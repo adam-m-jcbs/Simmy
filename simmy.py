@@ -26,6 +26,15 @@
 #    + Common scientific python tools: NumPy, matplotlib
 #    TODO: fill in other requirements
 
+#Global TODO
+#   + As currently designed, simmy imposes a directory structure convention.
+#   This can be a bit dangerous as I rely on this assumption quite a bit (e.g. I
+#   will infer simulation labels from directory labels).  A user manually
+#   changing a directory name can break pretty much everything.  Is it worth it
+#   to redesign?  I personally like systematically enforcing a directory
+#   structure/organization, but I predict this to be a point of fragility for
+#   users that aren't me.
+
 ###########################################
 ### Global Imports, Data, and Constants ###
 ###########################################
@@ -35,6 +44,12 @@ import sys
 if not sys.version_info >= (3,):
     #TODO if you can, perhaps make this work for 2.7+ and 3 with from __future__
     raise RuntimeError("simmy requires Python 3")
+
+#ASCII escape sequences for color text
+START_RED   = '\033[31m'
+START_GREEN = '\033[32m'
+START_BLUE  = '\033[34m'
+RESET       = '\033[0m'
 
 ##################################
 ### Simulation Management Code ###
@@ -88,6 +103,7 @@ class SimulationGrid(object):
             self._scratch_base = scratch_base
             self._use_scratch = True
         self._label = label
+        self._my_sims = self._getActiveSims()
  
     ##Public methods##
     def listSimulations(self):
@@ -98,7 +114,8 @@ class SimulationGrid(object):
         so that they will not pollute the list.
         
         This basic implementation just lists the labels.  It is advised to
-        override this in a subclass to add other relevant information."""
+        override this in a subclass to add other relevant information.
+        """
         #from supercomputer import TermColors, Supercomputer #TODO delete
         from os.path import isfile, isdir, join
         from glob import glob
@@ -111,9 +128,9 @@ class SimulationGrid(object):
         else:
             heading = '{0:29s}'.format('Label')
             list_format = '{0:29s}'
-        yep    = TermColors.START_GREEN + '{0:14s}'.format("Yes!")    + TermColors.RESET
-        nope   = TermColors.START_RED   + '{0:14s}'.format("No!")     + TermColors.RESET
-        purged = TermColors.START_BLUE  + '{0:14s}'.format("Purged!") + TermColors.RESET
+        yep    = START_GREEN + '{0:14s}'.format("Yes!")    + RESET
+        nope   = START_RED   + '{0:14s}'.format("No!")     + RESET
+        purged = START_BLUE  + '{0:14s}'.format("Purged!") + RESET
         
         print(heading)
         for r in active_runs:
@@ -292,19 +309,16 @@ class SimulationGrid(object):
         return ret
 
     def _getActiveSims(self):
-        """Return a list of Simulation objects representing the simulations in this grid."""
-        ret = []
-
-        for d in listdir(self._stage_base):
-            if d == 'inactive':
-                continue
-            #TODO This uses Simulation, which should generally be subclassed.
-            #Think about if we should do some fancy reflection of some sort to
-            #use the proper subclass' static factory method
-            newSimObject = Simulation.genFromDir(d)
-            ret.append(newSimObject)
-
-        return ret
+        """Return a list of Simulation objects representing the simulations in this grid.
+        
+        This should be implemented by subclasses, making use of their subclass
+        of Simulation."""
+       
+        #TODO Any way to make a reasonable version of this in SimulationGrid?
+        #     Maybe pass in the desired Simulation subclass?
+        raise NotImplementedError("A subclass of SimulationGrid did not implement
+        this method or you're directly instantiating SimulationGrid.  Either way,
+        NO!")
 
 # Simulation class to represent a specific simulation.
 class Simulation(object):
@@ -312,15 +326,80 @@ class Simulation(object):
     as well as the different management and analysis actions you'd like to carry
     out on a simulation."""
 
-    def __init__(self, label, grid_label):
-        """Initializes a simulation object using existing data.  To generate a
-        new simulation, use this class's static factory methods.
+    def __init__(self, label, base_dir):
+        """Initializes a simulation object using an existing setup in a
+        directory. To generate a new simulation, use this class's static factory
+        methods.
         
         Arguments:
-            label      --> label for this simulation
-            grid_label --> label for the grid/suite of simulations this is a
-                           part of.  Can also be thought of as a project label.
+            label      --> label for this simulation, will also be name of dir
+                           where it's stored
+            base_dir   --> path to the base directory this simulation is stored in
         """
+        self.label = label
+        self._full_path = join(base_dir, label)
+        self._initFromDir(join(base_dir, label))
+
+    def _initFromDir(self, simdir):
+        """Initialize the simulation from an existing directory containing
+        configuration and output."""
+        self._config = self._genConfig(simdir)
+        self._output = self._genOutput(simdir)
+
+    def _genConfig(self, simdir):
+        """Generate a SimConfig object for this simulation based on existing
+        configuration."""
+
+        raise NotImplementedError("A subclass of Simulation did not implement
+        this method or you're directly instantiating Simulation.  Either way,
+        NO!")
+
+    def _genOutput(self, simdir):
+        """Generate a SimOutput object for this simulation based on existing
+        configuration."""
+
+        raise NotImplementedError("A subclass of Simulation did not implement
+        this method or you're directly instantiating Simulation.  Either way,
+        NO!")
+
+
+
+class SimConfig(object):
+    """Represents all of the configuration needed to specify a particular
+    simulation.  This includes inputs files, any initial models, and the files
+    needed to execute the simulation (binaries, batch scripts, etc)."""
+
+    def __init__(self, simdir):
+        """Constructs a SimConfig object using an existing configuration in the
+        given directory."""
+        self._initFromDir(simdir)
+
+    def _initFromDir(self, simdir):
+        """Initialize this object using an existing configuration.  Subclasses
+        must define how to do this for their particular code."""
+
+        raise NotImplementedError("A subclass of SimConfig did not implement
+        this method or you're directly instantiating SimConfig.  Either way,
+        NO!")
+
+class SimOutput(object):
+    """Represents the products of a simulation, such as checkpoint files, data
+    files, diagnostic data, etc."""
+
+    def __init__(self, simdir):
+        """Constructs a SimOutput object using an existing configuration in the
+        given directory."""
+        self._initFromDir(simdir)
+
+    def _initFromDir(self, simdir):
+        """Initialize this object using an existing configuration.  Subclasses
+        must define how to do this for their particular code."""
+
+        raise NotImplementedError("A subclass of SimOutput did not implement
+        this method or you're directly instantiating SimOutput.  Either way,
+        NO!")
+
+
 
 ###############################
 ### Machine Management Code ###
