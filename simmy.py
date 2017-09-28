@@ -368,23 +368,62 @@ class SimConfig(object):
     """Represents all of the configuration needed to specify a particular
     simulation.  This includes inputs files, any initial models, and the files
     needed to execute the simulation (binaries, batch scripts, etc)."""
+    #TODO 
+    #   + Add utility method to inspect and explain config dictionaries
+    #   + Add ability to modify an existing configuration
 
-    def __init__(self, simdir):
-        """Constructs a SimConfig object using an existing configuration in the
-        given directory."""
-        self._initFromDir(simdir)
+    def __init__(self, simdir, config_dicts=None):
+        """Constructs a SimConfig object representing a simulation found in
+        simdir.
+        
+        If a simulation already exists in simdir, it will be used to create this
+        class.  If not, you need to provide config_dicts.  The simulation's
+        label will be the name of the base directory of simdir.
+        
+        config_dicts is a dictionary of dictionaries.  Each dictionary specifies
+        an aspect of the simulation's configuration, with subclasses having the
+        freedom to choose how many such dictionaries are needed and what they
+        contain.  These will be used to generate the files necessary to specify
+        a simulation's configuration.
+        """
+        from os.path import basename
+        self._label = basename(simdir)
+        self._simdir = simdir
+        if config_dicts is None:
+            self._config_dicts = self._initFromDir()
+        else:
+            self._config_dicts = config_dicts
+            self._initFromDicts()
 
-    def _initFromDir(self, simdir):
-        """Initialize this object using an existing configuration.  Subclasses
-        must define how to do this for their particular code."""
+    def _initFromDir(self):
+        """Initialize this object using an existing configuration found in
+        self._simdir.  Subclasses must define how to do this for their
+        particular code. A set of dictionaries defining the configuration should
+        be returned."""
 
         raise NotImplementedError("A subclass of SimConfig did not implement
         this method or you're directly instantiating SimConfig.  Either way,
         NO!")
 
+    def _initFromDicts(self):
+        """Initialize this object using the configuration dictionaries found in
+        self._config_dicts.  Subclasses must define how to do this for their
+        particular code.
+        
+        config_dicts is intended to be a dictionary of dictionaries, each
+        containing configuration data for different aspects of the simulations.
+        For example, there could be a dictionary for initial model data and one
+        for code parameters.  Whatever makes sense for your code.
+        """
+
+        raise NotImplementedError("A subclass of SimConfig did not implement
+        this method or you're directly instantiating SimConfig.  Either way,
+        NO!")
+
+
 class SimOutput(object):
     """Represents the products of a simulation, such as checkpoint files, data
-    files, diagnostic data, etc."""
+    files, diagnostic data, etc, as well as tools for managing the data."""
 
     def __init__(self, simdir):
         """Constructs a SimOutput object using an existing configuration in the
@@ -399,6 +438,53 @@ class SimOutput(object):
         this method or you're directly instantiating SimOutput.  Either way,
         NO!")
 
+class TemplateFile(object):
+    """Represents a template file. 
+    
+    The essential elements are a string representing the content of a file with
+    .format()-style format-spec replacement tokens through the file as well as a
+    dictionary containing the values to be substituted in.
+    """
+
+    def __init__(self, replacement_dict, template_string, lead_space):
+        """Construct a TemplateFile
+
+        Arguments:
+            replacement_dict --> Dictionary of data to be substituted into the template file.
+            template_string --> A template of the file's content, with
+                               .format()-style format-spec tokens to be replaced with
+                               replacement_dict values
+            lead_space --> The number of leading spaces to be removed from all
+                           lines in template_string except for the first line (similar to how
+                           python doc strings are processed).
+        """
+        self._replacement_dict = replacement_dict
+        self._template_string = template_string
+        self._lead_space = lead_space
+        self._initFileText()
+
+    def saveFile(self, savepath):
+        """Save the file to the given full path."""
+        with open(savepath, 'w') as f:
+            f.write(self._filetext)
+
+    def getFileText(self):
+        """Get the final, processed text of the file."""
+        return self._filetext
+
+    def _initFileText(self):
+        """Initialize the file's text."""
+        template_lines = self._template_string.splitlines(keepends=True)
+        file_lines = [template_lines[0]]
+        #Trim leading spaces, except on the first line
+        for line in template_lines[1:]:
+            file_lines.append(line[self._lead_space:])
+        filetext = "".join(file_lines)
+
+        #Populate template with data from dictionary
+        filetext.format(**self._replacement_dict)
+        self._filetext = filetext
+ 
 
 
 ###############################

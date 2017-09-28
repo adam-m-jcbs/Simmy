@@ -141,7 +141,12 @@ class SCSimulation(Simulation):
 class SCConfig(SimConfig):
     """Represents all of the configuration needed to specify a sub-Chandra
     simulation.  This includes inputs files, initial models, and the location of
-    needed binary files."""
+    needed binary files.
+    
+    The class tries to handle the details and set reasonable defaults for things
+    that don't change much from simulation to simulation.  The user-tunable
+    properties of the configuration are stored in a set of dictionaries.  See
+    genInputsDict(), genIMDict(), and genRunDict() for details on each."""
 
     def __init__(self, simdir):
         """Constructs an SCConfig object using an existing configuration in the
@@ -209,24 +214,25 @@ class SCConfig(SimConfig):
     def _initInputsDict(self):
         """Initialize a dictionary of inputs variables based on the inputs file.
         
-        Creates self._inputs_dict
+        Populates self._config_dicts['inputs_dict']
         """
         #An inputs file consists of definitions of the form "var = value".
         #Here we convert this into a dictionary that will allow easy programmatic
         #access to these variables.
-        self._inputs_dict = {}
+        inputs_dict = self._config_dicts['inputs_dict']
         with open(self._inputs_file, 'r') as f:
             for line in f:
                 tokens = line.partition('=')
                 if tokens[1]: #Only do anything if a '=' was found
                     key = tokens[0].strip()
                     strval = tokens[2].strip()
-                    self._inputs_dict[key] = strval
+                    inputs_dict[key] = strval
 
     def _initIMDict(self):
         """Initialize a dictionary of initial model data, config.
         
-        Creates self._im_dict
+        Creates self._im_dict.  Contains all of the data from initial model
+        files and the _params file used to generate this data.
         """
         from numpy import loadtxt, array
         #TODO Make sure loadtxt is robust for things like blank lines, bad lines, etc
@@ -270,73 +276,101 @@ class SCConfig(SimConfig):
         self._run_dict['process_script'] = 
         self._run_dict['exe_label'] = 
 
-    def _inputsFile(self, sim_label, **kwargs):
-        """Return a string representing the content of an inputs file populated
-        with data from **kwargs.
+    def _initFromDicts(self):
+        """Initialize this object using the configuration dictionaries found in
+        self._config_dicts.
+
+        For sub-Chandra, the config dicts are labeled "im_dict", "inputs_dict",
+        and "run_dict."
+
+        im_dict:
+            A dictionary of parameters used to generate the 1D initial model as
+            well as the data from the generated model.
+        inputs_dict:
+            A dictionary of the variables in the inputs file that's passed to
+            the Maestro executable.
+        run_dict:
+            A dictionary of the parameters configuring the script that runs the
+            simulation when submitted to the supercomputer queue.
+
+        Note that these dictionaries need not be fully specified by the user and
+        that some entries may be derived.
+        """
+ 
+    def _genInputsFile(self, savepath):
+        """Generate and save an inputs file populated with data
+        self._config_dicts['inputs_dict'].
         
-        Data is inserted into a template based on the passed keyword args.
-        If no kwargs are given or expected values are missing,
-        default values defined in this method are used.
+        Data is inserted into a template based on the inputs dictionary.
+        If expected values are missing, default values defined in this method
+        are used.
 
         Arguments:
-            sim_label --> label for the simulation, no spaces (e.g. 10044-090-210-4lev-full-512)
+            savepath  --> Full path to the location where this file should be saved
 
-        Keyword arguments:
-            im_file   --> Name of the "hse" initial model file
-            job_name  --> Description of simulation that will be in the
-                          job_info/inputs file
-            max_levs  --> The maximum number of levels the AMR will refine to
+        inputs_dict keys used.  Those with * are typically unique to a
+        simulation and should have been initialized in the dictionary:
+            im_file*   --> Name of the "hse" initial model file
+            job_name*  --> Description of simulation that will be in the
+                           job_info/inputs file
+            max_levs   --> The maximum number of levels the AMR will refine to
             coarse_res --> Resolution of the base (coarsest) mesh
-            anelastic_cutoff --> Density below which Maestro's velocity
-                                 constraint switches to the anelastic constraint instead of the fancy
-                                 low Mach constraint.  This helps alleviate issues at the edge of the
-                                 star as density plummets.
-            octant    --> .true. or .false.
-                          If true, model an octant of a star, a full star otherwise
-            dim       --> Dimensionality of the problem (2D or 3D)
-            physical_size --> Physical extent of the domain cube in cm
-            plt_delta --> Periodic interval in seconds at which pltfiles should
-                          be saved. A pltfile will be saved every plt_delta of
-                          simulation time.
+            anelastic_cutoff* --> Density below which Maestro's velocity
+                                  constraint switches to the anelastic constraint instead of the fancy
+                                  low Mach constraint.  This helps alleviate issues at the edge of the
+                                  star as density plummets.
+            octant     --> .true. or .false.
+                           If true, model an octant of a star, a full star otherwise
+            dim        --> Dimensionality of the problem (2D or 3D)
+            physical_size* --> Physical extent of the domain cube in cm
+            plt_delta  --> Periodic interval in seconds at which pltfiles should
+                           be saved. A pltfile will be saved every plt_delta of
+                           simulation time.
             miniplt_delta --> Same as plt_delta but for minipltfiles
-            chk_int   --> Periodic interval in timesteps (integer! not seconds)
-                          at which checkpoint files should be saved
+            chk_int    --> Periodic interval in timesteps (integer! not seconds)
+                           at which checkpoint files should be saved
         """
+        from simmy import TemplateFile
         #Define default dictionary values
-        inputs_keywords = {}
-        inputs_keywords['im_file'] = "sub_chandra.M_WD-1.00.M_He-0.045.hse.C.10240"
-        inputs_keywords['job_name'] = "512^3 base grid, T_core = 10^7, T_base = 210 MK -- M_WD=1.0, M_He=0.04"
-        inputs_keywords['max_levs'] = 4
-        inputs_keywords['coarse_res'] = 512
-        inputs_keywords['anelastic_cutoff'] = 64000.0
-        inputs_keywords['octant'] = ".false."
-        inputs_keywords['dim'] = 3
-        inputs_keywords['physical_size'] = 1500000000.0
-        inputs_keywords['plt_delta'] = 5.0
-        inputs_keywords['miniplt_delta'] = 0.2
-        inputs_keywords['chk_int'] = 10
+        inputs_dict = self._config_dicts['inputs_dict']
+        inputs_defaults = {}
+        inputs_defaults['im_file'] = "sub_chandra.M_WD-1.00.M_He-0.045.hse.C.10240"
+        inputs_defaults['job_name'] = "512^3 base grid, T_core = 10^7, T_base = 210 MK -- M_WD=1.0, M_He=0.04"
+        inputs_defaults['max_levs'] = 4
+        inputs_defaults['coarse_res'] = 512
+        inputs_defaults['anelastic_cutoff'] = 64000.0
+        inputs_defaults['octant'] = ".false."
+        inputs_defaults['dim'] = 3
+        inputs_defaults['physical_size'] = 1500000000.0
+        inputs_defaults['plt_delta'] = 5.0
+        inputs_defaults['miniplt_delta'] = 0.2
+        inputs_defaults['chk_int'] = 10
+
+        for key in inputs_defaults:
+            if key not in inputs_dict:
+                inputs_dict[key] = inputs_default[key]
 
         #Define derived dictionary values
-        pltfile_base = sim_label + "_plt"
-        inputs_keywords['pltfile_base'] = pltfile_base
-        miniplt_base = sim_label + "_miniplt"
-        inputs_keywords['miniplt_base'] = miniplt_base
-        chkfile_base = sim_label + "_chk"
-        inputs_keywords['chkfile_base'] = chkfile_base
+        pltfile_base = self._label + "_plt"
+        inputs_dict['pltfile_base'] = pltfile_base
+        miniplt_base = self._label + "_miniplt"
+        inputs_dict['miniplt_base'] = miniplt_base
+        chkfile_base = self._label + "_chk"
+        inputs_dict['chkfile_base'] = chkfile_base
        
-        if inputs_keywords['octant'].lower().count('false') > 0:
-            inputs_keywords['bc_lo'] = 12
-            inputs_keywords['bc_hi'] = 12
+        if inputs_dict['octant'].lower().count('false') > 0:
+            inputs_dict['bc_lo'] = 12
+            inputs_dict['bc_hi'] = 12
         else:
-            inputs_keywords['bc_lo'] = 13
-            inputs_keywords['bc_hi'] = 12
+            inputs_dict['bc_lo'] = 13
+            inputs_dict['bc_hi'] = 12
 
         #Define the base template string
         inputs_template = """&PROBIN
          model_file = "{im_file:s}"
          drdxfac = 5
         
-         job_name = "{job_name}"
+         job_name = "{job_name:s}"
         
          use_alt_energy_fix = T
          ppm_trace_forces = 0
@@ -436,11 +470,16 @@ class SCConfig(SimConfig):
         
         /"""
 
-        #Trim leading spaces
+        #Now create and save the file
+        inputs_file = TemplateFile(inputs_dict, inputs_template, 8)
+        inputs_file.saveFile(savepath)
 
-        #Populate template with data from dictionary
-        
-
+        #Finally, fully initialize the inputs dictionary by reading in the newly
+        #created file.  Only some inputs parameters need to be specified to
+        #generate inputs from the template.  This will populate the dictionary
+        #with all inputs parameters.
+        self._inputs_file = savepath
+        self._initInputsDict()
 
 class SCOutput(SimOutput):
     """Represents the products of a sub-Chandra, such as the diagnostics files,
