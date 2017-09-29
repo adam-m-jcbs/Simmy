@@ -145,13 +145,12 @@ class SCConfig(SimConfig):
     
     The class tries to handle the details and set reasonable defaults for things
     that don't change much from simulation to simulation.  The user-tunable
-    properties of the configuration are stored in a set of dictionaries.  See
-    genInputsDict(), genIMDict(), and genRunDict() for details on each."""
+    properties of the configuration are stored in a set of dictionaries."""
 
-    def __init__(self, simdir):
+    def __init__(self, simdir, config_dicts=None):
         """Constructs an SCConfig object using an existing configuration in the
         given directory."""
-        super(simdir)
+        super().__init__(simdir, config_dicts)
 
     def _initFromDir(self, simdir):
         """Initialize this object using an existing configuration."""
@@ -168,15 +167,14 @@ class SCConfig(SimConfig):
                 {'im_dict': {}}
                 }
         self._initFiles(simdir) 
-        self._initInputsDict()
-        self._initIMDict()
-        self._initRunDict()
+        self._initInputsDictFromDir()
+        self._initIMDictFromDir()
 
     def _initFiles(self, simdir):
         """Initialize variables with paths to inputs and config files.
         
-        Initializes self._inputs_file, self._params_file, self._imdata_files,
-        self._runscript_file"""
+        Initializes self._inputs_file, self._params_file, self._imdata_files
+        """
         from os.path import join, basename
         #NOTE Convention established here: 
         #     A simulation directory contains a `model` directory with inputs
@@ -210,15 +208,7 @@ class SCConfig(SimConfig):
                     not currently implemented")
         self._imdata_files = (hse_list[0], extras_list[0])
 
-        #Script executed to run the simulation,
-        #will be submitted to supercomputer queue
-        runscript_list = glob(join(simdir, 'model', '*.run'))
-        if len(runscript_list) > 1:
-            raise NotImplementedError("Having multiple run scripts in model dir
-                    not currently implemented")
-        self._runscript_file = runscript_list[0]
-
-    def _initInputsDict(self):
+    def _initInputsDictFromDir(self):
         """Initialize a dictionary of inputs variables based on the inputs file.
         
         Populates self._config_dicts['inputs_dict']
@@ -235,8 +225,9 @@ class SCConfig(SimConfig):
                     strval = tokens[2].strip()
                     inputs_dict[key] = strval
 
-    def _initIMDict(self):
-        """Initialize a dictionary of initial model data, config.
+    def _initIMDictFromDir(self):
+        """Initialize a dictionary of initial model data, config from the files
+        found in the simulation directory.
         
         Populates self._config_dicts['im_dict'].  Contains all of the data from
         initial model files and the _params file used to generate this data.
@@ -270,22 +261,6 @@ class SCConfig(SimConfig):
         self._ihe4, self._ic12, self._io16 = 0, 1, 2
         im_dict['species'] = array([Xhe4, Xc12, Xo16])
 
-#    def _initRunDict(self):
-#        """Initialize a dictionary of key properties describing the runscript
-#        submitted to the supercomputer queue."""
-#        #TODO Generalize this to run on either supercomputer/cluster or local machine
-#        #     Actually, this should be in Machine.  This handles the TODO, and
-#        #     makes it possible to configure running on various machines.
-#        
-#        run_dict = self._config_dicts['run_dict']
-#        run_dict['allocation_label'] = 
-#        run_dict['job_label'] = 
-#        run_dict['walltime'] = 
-#        run_dict['nodes'] = 
-#        run_dict['threads_per_node'] = 
-#        run_dict['process_script'] = 
-#        run_dict['exe_label'] = 
-
     def _initFromDicts(self):
         """Initialize this object using the configuration dictionaries found in
         self._config_dicts.  The files associated with these dictionaries will
@@ -303,43 +278,24 @@ class SCConfig(SimConfig):
         Note that these dictionaries need not be fully specified by the user and
         that some entries may be derived.
         """
- 
-    def _genInputsFile(self, savepath):
-        """Generate and save an inputs file populated with data
-        self._config_dicts['inputs_dict'].
-        
-        Data is inserted into a template based on the inputs dictionary.
-        If expected values are missing, default values defined in this method
-        are used.
 
-        Arguments:
-            savepath  --> Full path to the location where this file should be saved
 
-        inputs_dict keys used.  Those with * are typically unique to a
-        simulation and should have been initialized in the dictionary:
-            im_file*   --> Name of the "hse" initial model file
-            job_name*  --> Description of simulation that will be in the
-                           job_info/inputs file
-            max_levs   --> The maximum number of levels the AMR will refine to
-            coarse_res --> Resolution of the base (coarsest) mesh
-            anelastic_cutoff* --> Density below which Maestro's velocity
-                                  constraint switches to the anelastic constraint instead of the fancy
-                                  low Mach constraint.  This helps alleviate issues at the edge of the
-                                  star as density plummets.
-            octant     --> .true. or .false.
-                           If true, model an octant of a star, a full star otherwise
-            dim        --> Dimensionality of the problem (2D or 3D)
-            physical_size* --> Physical extent of the domain cube in cm
-            plt_delta  --> Periodic interval in seconds at which pltfiles should
-                           be saved. A pltfile will be saved every plt_delta of
-                           simulation time.
-            miniplt_delta --> Same as plt_delta but for minipltfiles
-            chk_int    --> Periodic interval in timesteps (integer! not seconds)
-                           at which checkpoint files should be saved
+
+        #Finally, fully initialize all dictionaries from the created files.
+        #TODO I like to do this to make sure things are consistent for the two
+        #   methods of initialization.  But maybe it's not needed?
+        self._initInputsDictFromDir()
+
+    def _initInputsDict(self):
+        """Initialize the inputs dictionary of key properties describing the
+        inputs parameters passed to the Maestro executable.
+       
+        Initialize self._config_dicts['inputs_dict'] with default values for any
+        keys missing in the current dictionary.
         """
-        from simmy import TemplateFile
+        #TODO As of now, users can let all values be default.  This doesn't make
+        #   sense, choose which values are required to be passed.
         #Define default dictionary values
-        #TODO Move dict default init to method, like in RunConfig
         inputs_dict = self._config_dicts['inputs_dict']
         inputs_defaults = {}
         inputs_defaults['im_file'] = "sub_chandra.M_WD-1.00.M_He-0.045.hse.C.10240"
@@ -373,6 +329,41 @@ class SCConfig(SimConfig):
             inputs_dict['bc_lo'] = 13
             inputs_dict['bc_hi'] = 12
 
+    def _genInputsFile(self, savepath):
+        """Generate and save an inputs file populated with data
+        self._config_dicts['inputs_dict'].
+        
+        Data is inserted into a template based on the inputs dictionary, which
+        should already be initialized before calling.
+        If expected values are missing, default values defined in this method
+        are used.
+
+        Arguments:
+            savepath  --> Full path to the location where this file should be saved
+
+        inputs_dict keys used.  Those with * are typically unique to a
+        simulation and should have been initialized in the dictionary:
+            im_file*   --> Name of the "hse" initial model file
+            job_name*  --> Description of simulation that will be in the
+                           job_info/inputs file
+            max_levs   --> The maximum number of levels the AMR will refine to
+            coarse_res --> Resolution of the base (coarsest) mesh
+            anelastic_cutoff* --> Density below which Maestro's velocity
+                                  constraint switches to the anelastic constraint instead of the fancy
+                                  low Mach constraint.  This helps alleviate issues at the edge of the
+                                  star as density plummets.
+            octant     --> .true. or .false.
+                           If true, model an octant of a star, a full star otherwise
+            dim        --> Dimensionality of the problem (2D or 3D)
+            physical_size* --> Physical extent of the domain cube in cm
+            plt_delta  --> Periodic interval in seconds at which pltfiles should
+                           be saved. A pltfile will be saved every plt_delta of
+                           simulation time.
+            miniplt_delta --> Same as plt_delta but for minipltfiles
+            chk_int    --> Periodic interval in timesteps (integer! not seconds)
+                           at which checkpoint files should be saved
+        """
+        from simmy import TemplateFile
         #Define the base template string
         inputs_template = """&PROBIN
          model_file = "{im_file:s}"
@@ -480,14 +471,54 @@ class SCConfig(SimConfig):
 
         #Now create and save the file
         inputs_file = TemplateFile(inputs_dict, inputs_template, 8)
-        inputs_file.saveFile(savepath)
+        inputs_file.saveFile(self._inputs_file)
 
-        #Finally, fully initialize the inputs dictionary by reading in the newly
-        #created file.  Only some inputs parameters need to be specified to
-        #generate inputs from the template.  This will populate the dictionary
-        #with all inputs parameters.
-        self._inputs_file = savepath
-        self._initInputsDict()
+    def _initIMDict(self):
+        """Initialize the initial model dictionary of key properties describing the
+        1D initial model for this sub-Chandra simulation.
+       
+        Initialize self._config_dicts['im_dict'] with default values for any
+        keys missing in the current dictionary.
+        """
+        #TODO RESTART HERE, need to run the 1dmodel code to gen models
+        #TODO As of now, users can let all values be default.  This doesn't make
+        #   sense, choose which values are required to be passed.
+        #Define default dictionary values
+        inputs_dict = self._config_dicts['inputs_dict']
+        inputs_defaults = {}
+        inputs_defaults['im_file'] = "sub_chandra.M_WD-1.00.M_He-0.045.hse.C.10240"
+        inputs_defaults['job_name'] = "512^3 base grid, T_core = 10^7, T_base = 210 MK -- M_WD=1.0, M_He=0.04"
+        inputs_defaults['max_levs'] = 4
+        inputs_defaults['coarse_res'] = 512
+        inputs_defaults['anelastic_cutoff'] = 64000.0
+        inputs_defaults['octant'] = ".false."
+        inputs_defaults['dim'] = 3
+        inputs_defaults['physical_size'] = 1500000000.0
+        inputs_defaults['plt_delta'] = 5.0
+        inputs_defaults['miniplt_delta'] = 0.2
+        inputs_defaults['chk_int'] = 10
+
+        for key in inputs_defaults:
+            if key not in inputs_dict:
+                inputs_dict[key] = inputs_default[key]
+
+        #Define derived dictionary values
+        pltfile_base = self._label + "_plt"
+        inputs_dict['pltfile_base'] = pltfile_base
+        miniplt_base = self._label + "_miniplt"
+        inputs_dict['miniplt_base'] = miniplt_base
+        chkfile_base = self._label + "_chk"
+        inputs_dict['chkfile_base'] = chkfile_base
+       
+        if inputs_dict['octant'].lower().count('false') > 0:
+            inputs_dict['bc_lo'] = 12
+            inputs_dict['bc_hi'] = 12
+        else:
+            inputs_dict['bc_lo'] = 13
+            inputs_dict['bc_hi'] = 12
+
+
+
 
 class SCOutput(SimOutput):
     """Represents the products of a sub-Chandra, such as the diagnostics files,

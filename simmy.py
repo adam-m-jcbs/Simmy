@@ -343,10 +343,11 @@ class Simulation(object):
     def _initFromDir(self, simdir):
         """Initialize the simulation from an existing directory containing
         configuration and output."""
-        self._config = self._genConfig(simdir)
-        self._output = self._genOutput(simdir)
+        self._simconfig = self._genSimConfigFromDir(simdir)
+        self._runconfigs = self._genRunConfigsFromDir(simdir)
+        self._output = self._genOutputFromDir(simdir)
 
-    def _genConfig(self, simdir):
+    def _genSimConfigFromDir(self, simdir):
         """Generate a SimConfig object for this simulation based on existing
         configuration."""
 
@@ -354,7 +355,15 @@ class Simulation(object):
         this method or you're directly instantiating Simulation.  Either way,
         NO!""")
 
-    def _genOutput(self, simdir):
+    def _genRunConfigsFromDir(self, simdir):
+        """Generate a list of RunConfig objects for this simulation based on existing
+        configuration."""
+
+        raise NotImplementedError("""A subclass of Simulation did not implement
+        this method or you're directly instantiating Simulation.  Either way,
+        NO!""")
+
+    def _genOutputFromDir(self, simdir):
         """Generate a SimOutput object for this simulation based on existing
         configuration."""
 
@@ -362,12 +371,10 @@ class Simulation(object):
         this method or you're directly instantiating Simulation.  Either way,
         NO!""")
 
-
-
 class SimConfig(object):
     """Represents all of the configuration needed to specify a particular
-    simulation.  This includes inputs files, any initial models, and the files
-    needed to execute the simulation (binaries, batch scripts, etc)."""
+    simulation.  This could include inputs files, initial models, and/or the
+    location of any relevant codebases."""
     #TODO 
     #   + Add utility method to inspect and explain config dictionaries
     #   + Add ability to modify an existing configuration
@@ -505,9 +512,9 @@ class RunConfig(object):
     """Represents the configuration and files needed to execute a simulation on
     a particular machine.  
     
-    An instance of this class is stored by the Machine
-    class.  Subclasses should implement this for a particular machine (or class
-    of machine, e.g. a generic linux cluster) to be run on.
+    An instance of this class is stored in the Machine class.  Subclasses should
+    implement this for a particular machine (or class of machine, e.g. a generic
+    linux cluster) to be run on.
     """
 
     def __init__(self, simdir, config_dict=None):
