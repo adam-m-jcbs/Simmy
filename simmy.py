@@ -34,6 +34,7 @@
 #   to redesign?  I personally like systematically enforcing a directory
 #   structure/organization, but I predict this to be a point of fragility for
 #   users that aren't me.
+#   + Would it be better to use Namespaces instead of dicts for config?
 
 ###########################################
 ### Global Imports, Data, and Constants ###
@@ -173,9 +174,8 @@ class SimulationGrid(object):
         #structure
         sims = self._getActiveSims()
         for s in sims:
-            print(s._getStatusSummary()
+            print(s._getStatusSummary())
  
-        return
  
     ##Private methods##
     #TODO The below is for SubChandar sim, move to a subclass then delete
@@ -316,9 +316,9 @@ class SimulationGrid(object):
        
         #TODO Any way to make a reasonable version of this in SimulationGrid?
         #     Maybe pass in the desired Simulation subclass?
-        raise NotImplementedError("A subclass of SimulationGrid did not implement
+        raise NotImplementedError("""A subclass of SimulationGrid did not implement
         this method or you're directly instantiating SimulationGrid.  Either way,
-        NO!")
+        NO!""")
 
 # Simulation class to represent a specific simulation.
 class Simulation(object):
@@ -350,17 +350,17 @@ class Simulation(object):
         """Generate a SimConfig object for this simulation based on existing
         configuration."""
 
-        raise NotImplementedError("A subclass of Simulation did not implement
+        raise NotImplementedError("""A subclass of Simulation did not implement
         this method or you're directly instantiating Simulation.  Either way,
-        NO!")
+        NO!""")
 
     def _genOutput(self, simdir):
         """Generate a SimOutput object for this simulation based on existing
         configuration."""
 
-        raise NotImplementedError("A subclass of Simulation did not implement
+        raise NotImplementedError("""A subclass of Simulation did not implement
         this method or you're directly instantiating Simulation.  Either way,
-        NO!")
+        NO!""")
 
 
 
@@ -401,9 +401,9 @@ class SimConfig(object):
         particular code. A set of dictionaries defining the configuration should
         be returned."""
 
-        raise NotImplementedError("A subclass of SimConfig did not implement
+        raise NotImplementedError("""A subclass of SimConfig did not implement
         this method or you're directly instantiating SimConfig.  Either way,
-        NO!")
+        NO!""")
 
     def _initFromDicts(self):
         """Initialize this object using the configuration dictionaries found in
@@ -416,9 +416,9 @@ class SimConfig(object):
         for code parameters.  Whatever makes sense for your code.
         """
 
-        raise NotImplementedError("A subclass of SimConfig did not implement
+        raise NotImplementedError("""A subclass of SimConfig did not implement
         this method or you're directly instantiating SimConfig.  Either way,
-        NO!")
+        NO!""")
 
 
 class SimOutput(object):
@@ -434,9 +434,9 @@ class SimOutput(object):
         """Initialize this object using an existing configuration.  Subclasses
         must define how to do this for their particular code."""
 
-        raise NotImplementedError("A subclass of SimOutput did not implement
+        raise NotImplementedError("""A subclass of SimOutput did not implement
         this method or you're directly instantiating SimOutput.  Either way,
-        NO!")
+        NO!""")
 
 class TemplateFile(object):
     """Represents a template file. 
@@ -465,6 +465,9 @@ class TemplateFile(object):
 
     def saveFile(self, savepath):
         """Save the file to the given full path."""
+        from os.path import dirname
+        from os import makedirs
+        makedirs(dirname(savepath), exist_ok=True)
         with open(savepath, 'w') as f:
             f.write(self._filetext)
 
@@ -482,8 +485,9 @@ class TemplateFile(object):
         filetext = "".join(file_lines)
 
         #Populate template with data from dictionary
-        filetext.format(**self._replacement_dict)
-        self._filetext = filetext
+        #print('rep dict:   ', self._replacement_dict)
+        #print('rep string: ', filetext)
+        self._filetext = filetext.format(**self._replacement_dict)
  
 
 
@@ -507,7 +511,7 @@ class RunConfig(object):
     """
 
     def __init__(self, simdir, config_dict=None):
-         """Constructs a RunConfig object for a simulation found in
+        """Constructs a RunConfig object for a simulation found in
         simdir.
         
         If a simulation already exists in simdir, it will be used to create this
@@ -524,7 +528,7 @@ class RunConfig(object):
         self._label = basename(simdir)
         self._simdir = simdir
         if config_dict is None:
-            self._config_dict = self._initFromDir()
+            self._initFromDir()
         else:
             self._config_dict = config_dict
             self._initFromDict()
@@ -533,11 +537,13 @@ class RunConfig(object):
         """Initialize this object using an existing configuration found in
         self._simdir.  Subclasses must define how to do this for their
         particular code. A dictionary defining the configuration should
-        be returned."""
+        be initialized as self._config_dict."""
 
-        raise NotImplementedError("A subclass of RunConfig did not implement
+        #TODO Fragile to rely on implementers to define self._config_dict. Could
+        #redesign or use ABS?
+        raise NotImplementedError("""A subclass of RunConfig did not implement
         this method or you're directly instantiating RunConfig.  Either way,
-        NO!")
+        NO!""")
 
     def _initFromDict(self):
         """Initialize this object using the configuration dictionary found in
@@ -545,9 +551,9 @@ class RunConfig(object):
         particular machine.
         """
 
-        raise NotImplementedError("A subclass of RunConfig did not implement
+        raise NotImplementedError("""A subclass of RunConfig did not implement
         this method or you're directly instantiating RunConfig.  Either way,
-        NO!")
+        NO!""")
 
 
 

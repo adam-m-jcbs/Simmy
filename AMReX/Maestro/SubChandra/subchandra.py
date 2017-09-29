@@ -339,6 +339,7 @@ class SCConfig(SimConfig):
         """
         from simmy import TemplateFile
         #Define default dictionary values
+        #TODO Move dict default init to method, like in RunConfig
         inputs_dict = self._config_dicts['inputs_dict']
         inputs_defaults = {}
         inputs_defaults['im_file'] = "sub_chandra.M_WD-1.00.M_He-0.045.hse.C.10240"
