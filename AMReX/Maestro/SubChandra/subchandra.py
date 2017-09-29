@@ -1,5 +1,5 @@
 # This code implements the various classes from the simmy framework to represent
-# a sub-chandra grid of models.  The code is based in part of code I previously
+# a sub-chandra grid of models.  The code is based in part on code I previously
 # wrote to carry out the models described in
 # http://adsabs.harvard.edu/abs/2016ApJ...827...84J
 
@@ -163,13 +163,20 @@ class SCConfig(SimConfig):
         #   + location of template files?
         #   + job configuration
         #
+        self._config_dicts = {
+                {'inputs_dict': {}},
+                {'im_dict': {}}
+                }
         self._initFiles(simdir) 
         self._initInputsDict()
         self._initIMDict()
         self._initRunDict()
 
     def _initFiles(self, simdir):
-        """Initialize variables with paths to inputs and config files."""
+        """Initialize variables with paths to inputs and config files.
+        
+        Initializes self._inputs_file, self._params_file, self._imdata_files,
+        self._runscript_file"""
         from os.path import join, basename
         #NOTE Convention established here: 
         #     A simulation directory contains a `model` directory with inputs
@@ -231,12 +238,12 @@ class SCConfig(SimConfig):
     def _initIMDict(self):
         """Initialize a dictionary of initial model data, config.
         
-        Creates self._im_dict.  Contains all of the data from initial model
-        files and the _params file used to generate this data.
+        Populates self._config_dicts['im_dict'].  Contains all of the data from
+        initial model files and the _params file used to generate this data.
         """
         from numpy import loadtxt, array
         #TODO Make sure loadtxt is robust for things like blank lines, bad lines, etc
-        self._im_dict = {}
+        im_dict = self._config_dicts['im_dict']
 
         #Store initial model parameters
         #TODO I use this logic multiple times, move to helper function?
@@ -246,7 +253,7 @@ class SCConfig(SimConfig):
                 if tokens[1]: #Only do anything if a '=' was found
                     key = tokens[0].strip()
                     strval = tokens[2].strip()
-                    self._im_dict[key] = strval
+                    im_dict[key] = strval
 
         #Store initial model data
         hse_file = self._imdata_files[0]
@@ -254,34 +261,37 @@ class SCConfig(SimConfig):
         rad, rho, temp, pressure, Xhe4, Xc12, Xo16, Xfe56 = loadtxt(
                 hse_file, unpack=True)
         rad, cs, ent = loadtxt(extras_file, unpack=True)
-        self._im_dict['radius'] = rad
-        self._im_dict['density'] = rho
-        self._im_dict['temperature'] = temp
-        self._im_dict['pressure'] = pressure
-        self._im_dict['soundspeed'] = cs
-        self._im_dict['entropy'] = ent
+        im_dict['radius'] = rad
+        im_dict['density'] = rho
+        im_dict['temperature'] = temp
+        im_dict['pressure'] = pressure
+        im_dict['soundspeed'] = cs
+        im_dict['entropy'] = ent
         self._ihe4, self._ic12, self._io16 = 0, 1, 2
-        self._im_dict['species'] = array([Xhe4, Xc12, Xo16])
+        im_dict['species'] = array([Xhe4, Xc12, Xo16])
 
-    def _initRunDict(self):
-        """Initialize a dictionary of key properties describing the runscript
-        submitted to the supercomputer queue."""
-        #TODO Generalize this to run on either supercomputer/cluster or local machine
-        self._run_dict = {}
-        self._run_dict['allocation_label'] = 
-        self._run_dict['job_label'] = 
-        self._run_dict['walltime'] = 
-        self._run_dict['nodes'] = 
-        self._run_dict['threads_per_node'] = 
-        self._run_dict['process_script'] = 
-        self._run_dict['exe_label'] = 
+#    def _initRunDict(self):
+#        """Initialize a dictionary of key properties describing the runscript
+#        submitted to the supercomputer queue."""
+#        #TODO Generalize this to run on either supercomputer/cluster or local machine
+#        #     Actually, this should be in Machine.  This handles the TODO, and
+#        #     makes it possible to configure running on various machines.
+#        
+#        run_dict = self._config_dicts['run_dict']
+#        run_dict['allocation_label'] = 
+#        run_dict['job_label'] = 
+#        run_dict['walltime'] = 
+#        run_dict['nodes'] = 
+#        run_dict['threads_per_node'] = 
+#        run_dict['process_script'] = 
+#        run_dict['exe_label'] = 
 
     def _initFromDicts(self):
         """Initialize this object using the configuration dictionaries found in
-        self._config_dicts.
+        self._config_dicts.  The files associated with these dictionaries will
+        be created.
 
-        For sub-Chandra, the config dicts are labeled "im_dict", "inputs_dict",
-        and "run_dict."
+        For sub-Chandra, the config dicts are labeled "im_dict" and "inputs_dict"
 
         im_dict:
             A dictionary of parameters used to generate the 1D initial model as
@@ -289,9 +299,6 @@ class SCConfig(SimConfig):
         inputs_dict:
             A dictionary of the variables in the inputs file that's passed to
             the Maestro executable.
-        run_dict:
-            A dictionary of the parameters configuring the script that runs the
-            simulation when submitted to the supercomputer queue.
 
         Note that these dictionaries need not be fully specified by the user and
         that some entries may be derived.

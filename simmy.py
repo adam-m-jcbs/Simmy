@@ -497,5 +497,59 @@ class TemplateFile(object):
 
 # Machine class to represent the machine and filesystem we're currently on.
 
+class RunConfig(object):
+    """Represents the configuration and files needed to execute a simulation on
+    a particular machine.  
+    
+    An instance of this class is stored by the Machine
+    class.  Subclasses should implement this for a particular machine (or class
+    of machine, e.g. a generic linux cluster) to be run on.
+    """
+
+    def __init__(self, simdir, config_dict=None):
+         """Constructs a RunConfig object for a simulation found in
+        simdir.
+        
+        If a simulation already exists in simdir, it will be used to create this
+        class.  If not, you need to provide config_dict.  The run's
+        label will be the name of the base directory of simdir.
+        
+        config_dict is a dictionary of all parameters needed to configure a run
+        script for the simulation.  These may be scripts that are run directly
+        or submitted to a job queue.  Properties such as resources requires
+        (cores, memory), that name of the executable and any arguments, etc, may
+        be stored in the dictionary.
+        """
+        from os.path import basename
+        self._label = basename(simdir)
+        self._simdir = simdir
+        if config_dict is None:
+            self._config_dict = self._initFromDir()
+        else:
+            self._config_dict = config_dict
+            self._initFromDict()
+
+    def _initFromDir(self):
+        """Initialize this object using an existing configuration found in
+        self._simdir.  Subclasses must define how to do this for their
+        particular code. A dictionary defining the configuration should
+        be returned."""
+
+        raise NotImplementedError("A subclass of RunConfig did not implement
+        this method or you're directly instantiating RunConfig.  Either way,
+        NO!")
+
+    def _initFromDict(self):
+        """Initialize this object using the configuration dictionary found in
+        self._config_dict.  Subclasses must define how to do this for their
+        particular machine.
+        """
+
+        raise NotImplementedError("A subclass of RunConfig did not implement
+        this method or you're directly instantiating RunConfig.  Either way,
+        NO!")
+
+
+
 
 # TODO Write a small driver here that tests functionality.
