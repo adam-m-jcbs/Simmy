@@ -162,6 +162,10 @@ class SCConfig(SimConfig):
         #   + location of template files?
         #   + job configuration
         #
+        #TODO Currently I have all dictionary values from files as strings (even
+        #   things that are naturally floats, ints, or boolean).
+        #   This makes it easy to pull them out of and put them back in file form.
+        #   If proves annoying, change.
         self._config_dicts = {
                 {'inputs_dict': {}},
                 {'im_dict': {}}
@@ -216,6 +220,9 @@ class SCConfig(SimConfig):
         #An inputs file consists of definitions of the form "var = value".
         #Here we convert this into a dictionary that will allow easy programmatic
         #access to these variables.
+        #TODO As of now, this isn't consistent with init from scratch.  I use
+        #   more human-readable keys like 'coarse_res' instead of n_cellx =
+        #   n_celly = n_cellz.  But this will read in n_cell*.
         inputs_dict = self._config_dicts['inputs_dict']
         with open(self._inputs_file, 'r') as f:
             for line in f:
@@ -300,15 +307,15 @@ class SCConfig(SimConfig):
         inputs_defaults = {}
         inputs_defaults['im_file'] = "sub_chandra.M_WD-1.00.M_He-0.045.hse.C.10240"
         inputs_defaults['job_name'] = "512^3 base grid, T_core = 10^7, T_base = 210 MK -- M_WD=1.0, M_He=0.04"
-        inputs_defaults['max_levs'] = 4
-        inputs_defaults['coarse_res'] = 512
-        inputs_defaults['anelastic_cutoff'] = 64000.0
+        inputs_defaults['max_levs'] = '4'
+        inputs_defaults['coarse_res'] = '512'
+        inputs_defaults['anelastic_cutoff'] = '64000.0'
         inputs_defaults['octant'] = ".false."
-        inputs_defaults['dim'] = 3
-        inputs_defaults['physical_size'] = 1500000000.0
-        inputs_defaults['plt_delta'] = 5.0
-        inputs_defaults['miniplt_delta'] = 0.2
-        inputs_defaults['chk_int'] = 10
+        inputs_defaults['dim'] = '3'
+        inputs_defaults['physical_size'] = '1500000000.0'
+        inputs_defaults['plt_delta'] = '5.0'
+        inputs_defaults['miniplt_delta'] = '0.2'
+        inputs_defaults['chk_int'] = '10'
 
         for key in inputs_defaults:
             if key not in inputs_dict:
@@ -323,11 +330,11 @@ class SCConfig(SimConfig):
         inputs_dict['chkfile_base'] = chkfile_base
        
         if inputs_dict['octant'].lower().count('false') > 0:
-            inputs_dict['bc_lo'] = 12
-            inputs_dict['bc_hi'] = 12
+            inputs_dict['bc_lo'] = '12'
+            inputs_dict['bc_hi'] = '12'
         else:
-            inputs_dict['bc_lo'] = 13
-            inputs_dict['bc_hi'] = 12
+            inputs_dict['bc_lo'] = '13'
+            inputs_dict['bc_hi'] = '12'
 
     def _genInputsFile(self, savepath):
         """Generate and save an inputs file populated with data
@@ -473,52 +480,88 @@ class SCConfig(SimConfig):
         inputs_file = TemplateFile(inputs_dict, inputs_template, 8)
         inputs_file.saveFile(self._inputs_file)
 
-    def _initIMDict(self):
+    def _initIMDict(self, gen_im=True):
         """Initialize the initial model dictionary of key properties describing the
         1D initial model for this sub-Chandra simulation.
        
         Initialize self._config_dicts['im_dict'] with default values for any
-        keys missing in the current dictionary.
+        keys missing in the current dictionary.  This will also run the 1d model
+        generator using the given parameters, unless gen_im is False.
         """
-        #TODO RESTART HERE, need to run the 1dmodel code to gen models
         #TODO As of now, users can let all values be default.  This doesn't make
         #   sense, choose which values are required to be passed.
-        #Define default dictionary values
-        inputs_dict = self._config_dicts['inputs_dict']
-        inputs_defaults = {}
-        inputs_defaults['im_file'] = "sub_chandra.M_WD-1.00.M_He-0.045.hse.C.10240"
-        inputs_defaults['job_name'] = "512^3 base grid, T_core = 10^7, T_base = 210 MK -- M_WD=1.0, M_He=0.04"
-        inputs_defaults['max_levs'] = 4
-        inputs_defaults['coarse_res'] = 512
-        inputs_defaults['anelastic_cutoff'] = 64000.0
-        inputs_defaults['octant'] = ".false."
-        inputs_defaults['dim'] = 3
-        inputs_defaults['physical_size'] = 1500000000.0
-        inputs_defaults['plt_delta'] = 5.0
-        inputs_defaults['miniplt_delta'] = 0.2
-        inputs_defaults['chk_int'] = 10
+        #Define default dictionary values for the '_params' part of the IM dict.
+        #This is needed for the 1d model generator
+        im_dict = self._config_dicts['im_dict']
+        im_defaults = {}
+        im_defaults['M_tot'] = '1.0'                   #Mass of WD core in M_sol
+        im_defaults['M_He']  = '0.0445'                #Mass of He envelope in M_sol
+        im_defaults['delta'] = '2000000.0'             #Transition delta in cm
+        im_defaults['temp_core'] = '90000000.0'        #Isothermal core temp in K
+        im_defaults['temp_base'] = '210000000.0'       #Temp at base of He env in K
+        im_defaults['mixed_co_wd'] = '.false.'         #Core is C/O or just C?
+        im_defaults['low_density_cutoff'] = '1.d-4'    #Density floor for init model (not 3D Maestro simulation)
+        im_defaults['temp_fluff'] = '7.5d7'            #Temp floor, temp also set to this when density floor hit
+        im_defaults['smallt'] = '1.d6'                 #As far as I can tell, #this isn't used.  Maybe was synonym for temp_fluff
 
-        for key in inputs_defaults:
-            if key not in inputs_dict:
-                inputs_dict[key] = inputs_default[key]
+        #The initial model resolution should match Maestro's base state
+        #resolution.  This is derived from inputs.  TODO Users are allowed to
+        #override this, but shouldn't?
+        indict = self._config_dicts['inputs_dict']
+        max_levs = float(indict['max_levs'])
+        drdxfac = float(indict['drdxfac'])
+        coarse_res = float(indict['drdxfac'])
+        fine_res = coarse_res*2*(max_levs-1)
+        basestate_res = fine_res*drdxfac
+        nx = basestate_res
+        im_defaults['nx'] = str(nx)  #Resolution of the 1D model, number of cells
 
-        #Define derived dictionary values
-        pltfile_base = self._label + "_plt"
-        inputs_dict['pltfile_base'] = pltfile_base
-        miniplt_base = self._label + "_miniplt"
-        inputs_dict['miniplt_base'] = miniplt_base
-        chkfile_base = self._label + "_chk"
-        inputs_dict['chkfile_base'] = chkfile_base
-       
-        if inputs_dict['octant'].lower().count('false') > 0:
-            inputs_dict['bc_lo'] = 12
-            inputs_dict['bc_hi'] = 12
+        #The physical size of initial model also can be derived from inputs.
+        #for octant, it is same as domain size.  For full star, half.
+        #TODO In practice, an initial model is tried to get an idea of the
+        #   physical size of the domain, which is then put into inputs.
+        #   However, below we get IM size from inputs.  Would be
+        #   nice to formalize this algorithm here instead of the current method of
+        #   doing it manually.  
+        #   The basic algorithm is to do an initial model with the desired
+        #   properties with a relatively huge xmax.  Then, redo the initial
+        #   model with xmax set to be the radius of T_peak + 50% of that radius.
+        #   This will also be the size of the domain of the 3D grid.
+        #   This gives reasonable balance of buffer zone between surface of star
+        #   and edge of domain without wasting too many resources on unimportant
+        #   parts of the domain.
+        octant =
+        if octant:
+            xmax = domain_size
         else:
-            inputs_dict['bc_lo'] = 13
-            inputs_dict['bc_hi'] = 12
+            xmax = domain_size/2.0
+        
+        im_defaults['xmin'] = '0.0'
+        im_defaults['xmax'] = str(xmax)
+
+        for key in im_defaults:
+            if key not in im_dict:
+                im_dict[key] = im_defaults[key]
+
+        #TODO Maybe separate out 1d model generation?  But, IM dict can't be
+        #   fully init'd without 1d model file.
+        if gen_im:
+            #Use _params to generate the 1D model.
+
+            #Add results to dict
+
+        else:
+            #IM will be incomplete! Blank out uninitializeable fields.
 
 
-
+        im_dict['radius'] = rad
+        im_dict['density'] = rho
+        im_dict['temperature'] = temp
+        im_dict['pressure'] = pressure
+        im_dict['soundspeed'] = cs
+        im_dict['entropy'] = ent
+        self._ihe4, self._ic12, self._io16 = 0, 1, 2
+        im_dict['species'] = array([Xhe4, Xc12, Xo16])
 
 class SCOutput(SimOutput):
     """Represents the products of a sub-Chandra, such as the diagnostics files,

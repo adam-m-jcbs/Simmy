@@ -496,6 +496,32 @@ class TemplateFile(object):
         #print('rep string: ', filetext)
         self._filetext = filetext.format(**self._replacement_dict)
  
+class ConfigRecord(object):
+    """A single "configuration record" for a simulation.
+    
+    For example, a simulation could have a file that configures its initial
+    model, a file that configures its parameters, and a set of commands to carry
+    out the simulation.  Each of these could be represented with a ConfigRecord.
+
+    The core of a ConfigRecord is a dictionary with a set of fixed keys which
+    must be defined.
+    
+    A ConfigRecord may also have an associated file that they know how to
+    convert into a new ConfigRecord as well as how to write based on an existing
+    ConfigRecord.
+    """
+    #TODO Initially I thought of having this implement MutableMapping, but in
+    #   trying I wasn't sure it was buying me what I wanted and wasn't sure how to
+    #   safely customized the parsing of *args and **kwargs sent to __init__.  Might
+    #   want to revisit this.
+
+    #Design: 
+    #   + limited dictionary consisting of a set of keys defined at init.  keys
+    #     can't be changed after this.
+    #   + parallel dictionary with description of keys
+    #   + optional associated file
+    #TODO Restart here
+
 
 
 ###############################
