@@ -379,54 +379,44 @@ class SimConfig(object):
     #   + Add utility method to inspect and explain config dictionaries
     #   + Add ability to modify an existing configuration
 
-    def __init__(self, simdir, config_dicts=None):
+    def __init__(self, simdir, config_recs=None):
         """Constructs a SimConfig object representing a simulation found in
         simdir.
         
         If a simulation already exists in simdir, it will be used to create this
-        class.  If not, you need to provide config_dicts.  The simulation's
+        class.  If not, you need to provide config_recs.  The simulation's
         label will be the name of the base directory of simdir.
         
-        config_dicts is a dictionary of dictionaries.  Each dictionary specifies
-        an aspect of the simulation's configuration, with subclasses having the
-        freedom to choose how many such dictionaries are needed and what they
-        contain.  These will be used to generate the files necessary to specify
-        a simulation's configuration.
+        config_recs is list of ConfigRecords.  Each ConfigRecord specifies
+        an aspect of the simulation's configuration.
         """
         from os.path import basename
         self._label = basename(simdir)
         self._simdir = simdir
-        if config_dicts is None:
-            self._config_dicts = self._initFromDir()
+        if config_recs is None:
+            self._config_recs = self._initFromDir()
         else:
-            self._config_dicts = config_dicts
-            self._initFromDicts()
+            self._config_recs = config_recs
+            self._initFromRecs()
 
     def _initFromDir(self):
         """Initialize this object using an existing configuration found in
         self._simdir.  Subclasses must define how to do this for their
-        particular code. A set of dictionaries defining the configuration should
+        particular code. A list of ConfigRecords defining the configuration should
         be returned."""
 
         raise NotImplementedError("""A subclass of SimConfig did not implement
         this method or you're directly instantiating SimConfig.  Either way,
         NO!""")
 
-    def _initFromDicts(self):
-        """Initialize this object using the configuration dictionaries found in
-        self._config_dicts.  Subclasses must define how to do this for their
-        particular code.
-        
-        config_dicts is intended to be a dictionary of dictionaries, each
-        containing configuration data for different aspects of the simulations.
-        For example, there could be a dictionary for initial model data and one
-        for code parameters.  Whatever makes sense for your code.
+    def _initFromRecs(self):
+        """Initialize this object using the ConfigRecords in self._config_recs.
+        Subclasses must define how to do this for their particular code.
         """
 
         raise NotImplementedError("""A subclass of SimConfig did not implement
         this method or you're directly instantiating SimConfig.  Either way,
         NO!""")
-
 
 class SimOutput(object):
     """Represents the products of a simulation, such as checkpoint files, data
@@ -520,9 +510,71 @@ class ConfigRecord(object):
     #     can't be changed after this.
     #   + parallel dictionary with description of keys
     #   + optional associated file
-    #TODO Restart here
 
+    def __init__(self, fields_dict, fieldmap=None):
+        """Initialize ConfigRecord with a dict of the valid fields for this
+        record as well as a description of each field.  
+        
+        The keys of fields_dict will be the valid fields, and the values will be
+        the descriptions.  Optionally, an alias map may be passed that maps
+        aliases to valid fields.  The fieldmap is useful for mapping variable
+        names used in files to field names."""
+        #TODO Need a _label property?
+        self._fields = tuple(fields_dict.keys())
+        self._fields_desc = fields_dict.copy()
+        self._config_dict = {key: None for key in fields_dict}
+        self._myfile = None
+        #TODO Make sure field map still makes sense, maybe need to merge
+        #TemplateFile into ConfigRecord
+        self._fieldmap = fieldmap
 
+    def associateFile(self, tempfile):
+        """Associate a TemplateFile with this ConfigRecord.
+        
+        Optionally, a mapping may be passed that maps the ConfigRecord's fields
+        to the file's variables.  This allows ConfigRecord to have simplified
+        aliases for file variables.
+        
+        fieldmap --> {'file_variable': 'field'}"""
+        self._myfile = tempfile
+        #TODO Verify all fields are accounted for
+
+    def setFields(self, **kwargs):
+        """Set fields found in **kwargs."""
+        for key, val in kwargs.iteritems():
+            self.setField(key, val)
+
+    def setField(self, field, data):
+        """Set a single field."""
+        #Map the field, if needed
+        cur_key = field
+        if cur_key in fieldmap:
+            cur_key = fieldmap[field]
+        if cur_key not in self._fields:
+            raise KeyError("{} is not a valid field for this ConfigRecord".format(key))
+        self._config_dict[cur_key] = data
+
+    def getField(self, field):
+        """Get the data stored in field."""
+        if field not in self._fields:
+            raise KeyError("{} is not a valid field for this ConfigRecord".format(field))
+        return self._config_dict[field]
+
+    def getFieldDict(self):
+        """Get the underlying field dictionary."""
+        #TODO Changes to this by user will be reflected here, should do deep copy?
+        return self._config_dict
+
+    def saveFile(self):
+        """Save a configured file from this ConfigRecord's data."""
+        #TODO
+        pass
+
+    @classmethod
+    def genFromFile(cls):
+        """Construct a ConfigRecord from file."""
+        #TODO Does this make sense?
+        pass
 
 ###############################
 ### Machine Management Code ###

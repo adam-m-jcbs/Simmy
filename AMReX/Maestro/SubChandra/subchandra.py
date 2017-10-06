@@ -166,13 +166,17 @@ class SCConfig(SimConfig):
         #   things that are naturally floats, ints, or boolean).
         #   This makes it easy to pull them out of and put them back in file form.
         #   If proves annoying, change.
-        self._config_dicts = {
-                {'inputs_dict': {}},
-                {'im_dict': {}}
-                }
+        config_recs = []
+        #self._config_dicts = {
+        #        {'inputs_dict': {}},
+        #        {'im_dict': {}}
+        #        }
         self._initFiles(simdir) 
-        self._initInputsDictFromDir()
-        self._initIMDictFromDir()
+        inputs_rec = self._initInputsRecFromDir()
+        im_rec     = self._initIMRecFromDir()
+        config_recs.append(inputs_rec)
+        config_recs.append(im_rec)
+        return config_recs
 
     def _initFiles(self, simdir):
         """Initialize variables with paths to inputs and config files.
@@ -212,25 +216,40 @@ class SCConfig(SimConfig):
                     not currently implemented")
         self._imdata_files = (hse_list[0], extras_list[0])
 
-    def _initInputsDictFromDir(self):
-        """Initialize a dictionary of inputs variables based on the inputs file.
-        
-        Populates self._config_dicts['inputs_dict']
-        """
+    def _initInputsRecFromDir(self):
+        """Initialize a ConfigRecord of inputs variables based on the inputs file."""
+        from simmy import ConfigRecord
         #An inputs file consists of definitions of the form "var = value".
-        #Here we convert this into a dictionary that will allow easy programmatic
-        #access to these variables.
-        #TODO As of now, this isn't consistent with init from scratch.  I use
-        #   more human-readable keys like 'coarse_res' instead of n_cellx =
-        #   n_celly = n_cellz.  But this will read in n_cell*.
-        inputs_dict = self._config_dicts['inputs_dict']
+        #Here we convert this into a ConfigRecord that will allow easy programmatic
+        #access to and manipulation of these variables.
+
+        #Get file variables
+        file_vars = {} #inputs_dict = self._config_dicts['inputs_dict']
         with open(self._inputs_file, 'r') as f:
             for line in f:
                 tokens = line.partition('=')
                 if tokens[1]: #Only do anything if a '=' was found
                     key = tokens[0].strip()
                     strval = tokens[2].strip()
-                    inputs_dict[key] = strval
+                    file_vars[key] = strval
+
+        #Define fields
+        fields_dict, fieldmap = self._getInputsFields()
+        inputs_rec = ConfigRecord(fields_dict, fieldmap)
+        for key, val in file_vars:
+            try:
+                inputs_rec.setField(key, val)
+            except KeyError:
+                print('{} is an extra key in the file'.format(key))
+
+        #Define TemplateFile
+        inputs_template_text, lead_space = self._getInputsTempText()
+        field_dict = inputs_rec.getFieldDict()
+        inputs_tempfile = TemplateFile(field_dict, inputs_template_text, lead_space)
+    #def __init__(self, fields_dict):
+    #def setField(self, **kwargs):
+    #def associateFile(self, tempfile, fieldmap=None):
+    #def __init__(self, replacement_dict, template_string, lead_space):
 
     def _initIMDictFromDir(self):
         """Initialize a dictionary of initial model data, config from the files
@@ -286,55 +305,195 @@ class SCConfig(SimConfig):
         that some entries may be derived.
         """
 
-
-
         #Finally, fully initialize all dictionaries from the created files.
         #TODO I like to do this to make sure things are consistent for the two
         #   methods of initialization.  But maybe it's not needed?
         self._initInputsDictFromDir()
 
-    def _initInputsDict(self):
-        """Initialize the inputs dictionary of key properties describing the
-        inputs parameters passed to the Maestro executable.
-       
-        Initialize self._config_dicts['inputs_dict'] with default values for any
-        keys missing in the current dictionary.
-        """
+    #def _initInputsDict(self):
+    def _getInputsFields(self):
+        """Get a dictionary of inputs fields and their descriptions, as well as
+        a mapping from file variable name to ConfigRecord field names."""
+        inputs_fields = {}
+        fieldmap = {}
+        inputs_fields['im_file'] = 'Initial model file with data to be read into the Maestro basestate.'
+        inputs_fields['job_name'] = 'Description of the simulation.'
+        inputs_fields['max_levs'] = 'Number of levels the AMR will refine to.'
+        inputs_fields['coarse_res'] = 'Resolution of the base (coarsest) level'
+        fieldmap['n_cellx'] = 'coarse_res'
+        fieldmap['n_celly'] = 'coarse_res'
+        fieldmap['n_cellz'] = 'coarse_res'
+        inputs_fields['anelastic_cutoff'] = 'Density cutoff below which the Maestro velocity constraint is simplified to the anelastic constraint.'
+        inputs_fields['octant'] = "Boolean that sets if an octant or full star should be modeled."
+        inputs_fields['dim'] = 'Dimensionality of the problem.'
+        fieldmap['dm_in'] = 'dim'
+        inputs_fields['physical_size'] = 'Sidelength in cm of the square domain.'
+        fieldmap['prob_hi_x'] = 'physical_size'
+        fieldmap['prob_hi_y'] = 'physical_size'
+        fieldmap['prob_hi_z'] = 'physical_size'
+        inputs_fields['plot_deltat'] = 'Time interval in s at which to save pltfiles.'
+        inputs_fields['mini_plot_deltat'] = 'Time interval in s at which to save minipltfiles.'
+        inputs_fields['chk_int'] = 'Timestep interval at which to save chkpoint files.'
+        inputs_fields['plot_base_name'] = 'Basename for pltfiles. Pltfiles will be saved with this name plus their timestep.'
+        inputs_fields['mini_plot_base_name'] = 'Basename for minipltfiles. Minipltfiles will be saved with this name plus their timestep.'
+        inputs_fields['check_base_name'] = 'Basename for checkpoint files. Chkfiles will be saved with this name plus their timestep.'
+        inputs_fields['bc_lo'] = 'Integer flag for the lower (x=y=z=0) boundary'
+        fieldmap['bcx_lo'] = 'bc_lo'
+        fieldmap['bcy_lo'] = 'bc_lo'
+        fieldmap['bcz_lo'] = 'bc_lo'
+        inputs_fields['bc_hi'] = 'Integer flag for the hi (x=y=z=max) boundary'
+        fieldmap['bcx_hi'] = 'bc_hi'
+        fieldmap['bcy_hi'] = 'bc_hi'
+        fieldmap['bcz_hi'] = 'bc_hi'
+
+        return inputs_fields, fieldmap
         #TODO As of now, users can let all values be default.  This doesn't make
         #   sense, choose which values are required to be passed.
         #Define default dictionary values
-        inputs_dict = self._config_dicts['inputs_dict']
-        inputs_defaults = {}
-        inputs_defaults['im_file'] = "sub_chandra.M_WD-1.00.M_He-0.045.hse.C.10240"
-        inputs_defaults['job_name'] = "512^3 base grid, T_core = 10^7, T_base = 210 MK -- M_WD=1.0, M_He=0.04"
-        inputs_defaults['max_levs'] = '4'
-        inputs_defaults['coarse_res'] = '512'
-        inputs_defaults['anelastic_cutoff'] = '64000.0'
-        inputs_defaults['octant'] = ".false."
-        inputs_defaults['dim'] = '3'
-        inputs_defaults['physical_size'] = '1500000000.0'
-        inputs_defaults['plt_delta'] = '5.0'
-        inputs_defaults['miniplt_delta'] = '0.2'
-        inputs_defaults['chk_int'] = '10'
+        #TODO DEFAULTS HERE, move to new method
+        #inputs_dict = self._config_dicts['inputs_dict']
+        #inputs_defaults = {}
+        #inputs_defaults['im_file'] = "sub_chandra.M_WD-1.00.M_He-0.045.hse.C.10240"
+        #inputs_defaults['job_name'] = "512^3 base grid, T_core = 10^7, T_base = 210 MK -- M_WD=1.0, M_He=0.04"
+        #inputs_defaults['max_levs'] = '4'
+        #inputs_defaults['coarse_res'] = '512'
+        #inputs_defaults['anelastic_cutoff'] = '64000.0'
+        #inputs_defaults['octant'] = ".false."
+        #inputs_defaults['dim'] = '3'
+        #inputs_defaults['physical_size'] = '1500000000.0'
+        #inputs_defaults['plt_delta'] = '5.0'
+        #inputs_defaults['miniplt_delta'] = '0.2'
+        #inputs_defaults['chk_int'] = '10'
 
-        for key in inputs_defaults:
-            if key not in inputs_dict:
-                inputs_dict[key] = inputs_default[key]
+        #for key in inputs_defaults:
+        #    if key not in inputs_dict:
+        #        inputs_dict[key] = inputs_default[key]
 
-        #Define derived dictionary values
-        pltfile_base = self._label + "_plt"
-        inputs_dict['pltfile_base'] = pltfile_base
-        miniplt_base = self._label + "_miniplt"
-        inputs_dict['miniplt_base'] = miniplt_base
-        chkfile_base = self._label + "_chk"
-        inputs_dict['chkfile_base'] = chkfile_base
+        ##Define derived dictionary values
+        #pltfile_base = self._label + "_plt"
+        #inputs_dict['pltfile_base'] = pltfile_base
+        #miniplt_base = self._label + "_miniplt"
+        #inputs_dict['miniplt_base'] = miniplt_base
+        #chkfile_base = self._label + "_chk"
+        #inputs_dict['chkfile_base'] = chkfile_base
        
-        if inputs_dict['octant'].lower().count('false') > 0:
-            inputs_dict['bc_lo'] = '12'
-            inputs_dict['bc_hi'] = '12'
-        else:
-            inputs_dict['bc_lo'] = '13'
-            inputs_dict['bc_hi'] = '12'
+        #if inputs_dict['octant'].lower().count('false') > 0:
+        #    inputs_dict['bc_lo'] = '12'
+        #    inputs_dict['bc_hi'] = '12'
+        #else:
+        #    inputs_dict['bc_lo'] = '13'
+        #    inputs_dict['bc_hi'] = '12'
+
+    def _getInputsTempText(self):
+        """Returns the template text and leading space for an inputs file."""
+        #TODO Currently, programmer should make sure fields here are the same as
+        #in ConfigRecord.  Would be nice to automagically do this.
+        #TODO Does this make sense as method?  Can I just define it as property
+        #or some such?
+        inputs_template = """&PROBIN
+         model_file = "{im_file:s}"
+         drdxfac = 5
+        
+         job_name = "{job_name:s}"
+        
+         use_alt_energy_fix = T
+         ppm_trace_forces = 0
+        
+         hg_bottom_solver = 4
+         mg_bottom_solver = 4
+         max_mg_bottom_nlevels = 2
+        
+         max_levs = {max_levs:d}
+         regrid_int = 2
+        
+         n_cellx = {coarse_res:d}
+         n_celly = {coarse_res:d}
+         n_cellz = {coarse_res:d}
+        
+         stop_time = 30000.
+        
+         max_step = 100000000
+        
+         init_iter = 1
+         init_divu_iter = 3
+         do_initial_projection = T
+        
+         max_grid_size_1 = 32
+         max_grid_size_2 = 64
+         max_grid_size_3 = 128
+        
+         the_sfc_threshold = 32768
+        
+         anelastic_cutoff = {anelastic_cutoff:f}
+         base_cutoff_density = 10000.0
+         buoyancy_cutoff_factor = 2.d0
+         sponge_center_density = {anelastic_cutoff:f}
+         sponge_start_factor = 2.0
+         sponge_kappa = 10.0d0
+        
+         spherical_in = 1
+         octant = {octant:s}
+         dm_in = {dim:d}
+         do_sponge = .true.
+        
+         prob_hi_x = {physical_size:f}
+         prob_hi_y = {physical_size:f}
+         prob_hi_z = {physical_size:f}
+        
+         plot_base_name = "{plot_base_name:s}"
+         plot_int = -1
+         plot_deltat = {plot_deltat:f}
+        
+         mini_plot_base_name = "{mini_plot_base_name:s}"
+         mini_plot_int = -1
+         mini_plot_deltat = {mini_plot_deltat:f}
+         mini_plot_var1 = "species"
+         mini_plot_var2 = "velocity"
+         mini_plot_var3 = "temperature"
+         mini_plot_var4 = "radial_velocity"
+        
+         check_base_name = "{check_base_name:s}"
+         chk_int = {chk_int:d}
+        
+         cflfac = 0.7d0
+         init_shrink = 0.1d0
+         max_dt_growth = 1.1d0
+         use_soundspeed_firstdt = T
+         use_divu_firstdt = T
+        
+         bcx_lo = {bc_lo:d}
+         bcx_hi = {bc_hi:d}
+         bcy_lo = {bc_lo:d}
+         bcy_hi = {bc_hi:d}
+         bcz_lo = {bc_lo:d}
+         bcz_hi = {bc_hi:d}
+        
+            verbose = 1
+         mg_verbose = 1
+         cg_verbose = 0
+        
+         do_burning = T
+        
+         enthalpy_pred_type = 1
+         evolve_base_state = T
+        
+         dpdt_factor = 0.0d0
+         species_pred_type = 1
+         use_tfromp = T
+        
+         single_prec_plotfiles = T
+        
+         use_eos_coulomb = T
+        
+         plot_trac = F
+         plot_base = T
+        
+         velpert_amplitude = 1.d5
+         velpert_scale = 5.d7
+         velpert_steep = 1.d7
+        /"""
+        lead_space = 8
+        return inputs_template, lead_space
 
     def _genInputsFile(self, savepath):
         """Generate and save an inputs file populated with data
