@@ -145,45 +145,67 @@ class SCConfig(SimConfig):
     
     The class tries to handle the details and set reasonable defaults for things
     that don't change much from simulation to simulation.  The user-tunable
-    properties of the configuration are stored in a set of dictionaries."""
+    properties of the configuration are stored in ConfigRecords."""
 
-    def __init__(self, simdir, config_dicts=None):
+    #TODO Organize methods: public first, static last, etc
+    def __init__(self, simdir, config_recs=None):
         """Constructs an SCConfig object using an existing configuration in the
         given directory."""
-        super().__init__(simdir, config_dicts)
+        super().__init__(simdir, config_recs)
 
-    def _initFromDir(self, simdir):
+    def _initFromDir(self):
         """Initialize this object using an existing configuration."""
-        from os.path import isfile, isdir, join, basename
 
         #Should include
         #   + inputs file data
         #   + initial model data
-        #   + location of template files?
-        #   + job configuration
+        #   + Xlocation of template files?
+        #   + Xjob configuration
         #
-        #TODO Currently I have all dictionary values from files as strings (even
-        #   things that are naturally floats, ints, or boolean).
-        #   This makes it easy to pull them out of and put them back in file form.
-        #   If proves annoying, change.
+        #TODO Should fields all be strings or have appropriate type?
+        #   Strings makes it easy to pull them out of and put them back in file form.
         config_recs = []
-        #self._config_dicts = {
-        #        {'inputs_dict': {}},
-        #        {'im_dict': {}}
-        #        }
-        self._initFiles(simdir) 
-        inputs_rec = self._initInputsRecFromDir()
-        im_rec     = self._initIMRecFromDir()
-        config_recs.append(inputs_rec)
-        config_recs.append(im_rec)
+        self._initFiles() 
+        #TODO For now I'm having SCConfig keep a local reference to the
+        #   ConfigRecords.  This suggests to me I might want to have subclasses of
+        #   ConfigRecord like InputsRecord and IMRecord.  I like the SimConfig super
+        #   class being able to do generic operations by iterating over
+        #   ConfigRecords, so if I do subclass I want to be careful to maintain this
+        #   ability.
+        self._inputs_rec = self._initInputsRecFromDir()
+        self._im_rec     = self._initIMRecFromDir()
+        config_recs.append(self._inputs_rec)
+        config_recs.append(self._im_rec)
         return config_recs
 
-    def _initFiles(self, simdir):
+    def _initFromRecs(self):
+        """Initialize this object using the partially initialized ConfigRecords
+        in self._config_recs.
+
+        The minimum non-default field values that need to be defined for this are:
+
+        Initial Model: M_tot, M_he, delta, temp_core, temp_base
+        Everything else can be derived.
+        """
+        #TODO Other things can be derived as mentioned above, but maybe I want
+        #to make sure they can be customized without derivation overwriting?
+        #Design TODO RESTART HERE
+        #  + Use the given parameters to build a first attempt at initial model
+        #  with large radius
+        #  + Based on result, rebuild initial model with a more reasonable
+        #  radius
+        #  + Store initial model and fully initialize im record
+        #  + Use results to fully initialize inputs record
+        #
+        #  Reference _computeRmacAndCutoffs, _generateInitModel from subchandra.py
+
+    def _initFiles(self):
         """Initialize variables with paths to inputs and config files.
         
         Initializes self._inputs_file, self._params_file, self._imdata_files
         """
         from os.path import join, basename
+        from glob import glob
         #NOTE Convention established here: 
         #     A simulation directory contains a `model` directory with inputs
         #     file in it.  inputs file looks like
@@ -192,39 +214,38 @@ class SCConfig(SimConfig):
         #TODO Use regex instead of glob, it's safer and better-defined
 
         #Input file that is passed to executable as arg
-        inputs_list = glob(join(simdir, 'model', 'inputs*'))
+        inputs_list = glob(join(self._simdir, 'model', 'inputs*'))
         if len(inputs_list) > 1:
-            raise NotImplementedError("Having multiple inputs files in model dir
-                    not currently implemented")
+            raise NotImplementedError("Having multiple inputs files in model dir not currently implemented")
         self._inputs_file = inputs_list[0] #NOTE full path
+        #print('inputs file: {}'.format(self._inputs_file))
       
         #Parameters file describing initial model parameters
-        params_list = glob(join(simdir, 'model', '_params*'))
+        params_list = glob(join(self._simdir, 'model', '_params*'))
         if len(params_list) > 1:
-            raise NotImplementedError("Having multiple _params files in model dir
-                    not currently implemented")
+            raise NotImplementedError("Having multiple _params files in model dir not currently implemented")
         self._params_file = params_list[0]
+        #print('_params file: {}'.format(self._params_file))
 
         #Initial model data, pointed to by inputs file
-        hse_list = glob(join(simdir, 'model', 'sub_chandra.*.hse.*'))
+        hse_list = glob(join(self._simdir, 'model', 'sub_chandra.*.hse.*'))
         if len(hse_list) > 1:
-            raise NotImplementedError("Having multiple hse initial model files in model dir
-                    not currently implemented")
-        extras_list = glob(join(simdir, 'model', 'sub_chandra.*.extras.*'))
+            raise NotImplementedError("Having multiple hse initial model files in model dir not currently implemented")
+        extras_list = glob(join(self._simdir, 'model', 'sub_chandra.*.extras.*'))
         if len(hse_list) > 1:
-            raise NotImplementedError("Having multiple extras initial model files in model dir
-                    not currently implemented")
+            raise NotImplementedError("Having multiple extras initial model files in model dir not currently implemented")
         self._imdata_files = (hse_list[0], extras_list[0])
+        #print('im data files: {}'.format(self._imdata_files))
 
     def _initInputsRecFromDir(self):
         """Initialize a ConfigRecord of inputs variables based on the inputs file."""
-        from simmy import ConfigRecord
+        from simmy import ConfigRecord, TemplateFile
         #An inputs file consists of definitions of the form "var = value".
         #Here we convert this into a ConfigRecord that will allow easy programmatic
         #access to and manipulation of these variables.
 
         #Get file variables
-        file_vars = {} #inputs_dict = self._config_dicts['inputs_dict']
+        file_vars = {}
         with open(self._inputs_file, 'r') as f:
             for line in f:
                 tokens = line.partition('=')
@@ -233,90 +254,225 @@ class SCConfig(SimConfig):
                     strval = tokens[2].strip()
                     file_vars[key] = strval
 
-        #Define fields
-        fields_dict, fieldmap = self._getInputsFields()
-        inputs_rec = ConfigRecord(fields_dict, fieldmap)
-        for key, val in file_vars:
+        #Define fields and initialize ConfigRecord
+        inputs_rec = SCConfig.genInputsConfigRec()
+        for key, val in file_vars.items():
             try:
                 inputs_rec.setField(key, val)
             except KeyError:
-                print('{} is an extra key in the file'.format(key))
+                pass
+                #print('{} is an extra key in the file'.format(key))
 
         #Define TemplateFile
-        inputs_template_text, lead_space = self._getInputsTempText()
+        inputs_template_text, lead_space = SCConfig._getInputsTempText()
         field_dict = inputs_rec.getFieldDict()
         inputs_tempfile = TemplateFile(field_dict, inputs_template_text, lead_space)
-    #def __init__(self, fields_dict):
-    #def setField(self, **kwargs):
-    #def associateFile(self, tempfile, fieldmap=None):
-    #def __init__(self, replacement_dict, template_string, lead_space):
 
-    def _initIMDictFromDir(self):
-        """Initialize a dictionary of initial model data, config from the files
+        #Associate the file and return
+        inputs_rec.associateFile(inputs_tempfile)
+        return inputs_rec
+
+    def _initIMRecFromDir(self):
+        """Initialize an initial model ConfigRecord from the files
         found in the simulation directory.
         
-        Populates self._config_dicts['im_dict'].  Contains all of the data from
-        initial model files and the _params file used to generate this data.
+        Returns a ConfigRecord representing initial model configuration.
+        Contains all of the data from initial model files and the _params file
+        used to generate this data.
         """
         from numpy import loadtxt, array
-        #TODO Make sure loadtxt is robust for things like blank lines, bad lines, etc
-        im_dict = self._config_dicts['im_dict']
+        from simmy import ConfigRecord, TemplateFile
 
-        #Store initial model parameters
+        #Store initial model parameters from _params file
         #TODO I use this logic multiple times, move to helper function?
+        file_vars = {}
         with open(self._params_file, 'r') as f:
             for line in f:
                 tokens = line.partition('=')
                 if tokens[1]: #Only do anything if a '=' was found
                     key = tokens[0].strip()
                     strval = tokens[2].strip()
-                    im_dict[key] = strval
+                    file_vars[key] = strval
+
+        #Define fields and initialize ConfigRecord
+        im_rec = SCConfig.genIMConfigRec()
+        for key, val in file_vars.items():
+            try:
+                im_rec.setField(key, val)
+            except KeyError:
+                pass
+                #print('{} is an extra key in the file'.format(key))
 
         #Store initial model data
         hse_file = self._imdata_files[0]
         extras_file = self._imdata_files[1]
+        #TODO Make sure loadtxt is robust for things like blank lines, bad lines, etc
         rad, rho, temp, pressure, Xhe4, Xc12, Xo16, Xfe56 = loadtxt(
                 hse_file, unpack=True)
         rad, cs, ent = loadtxt(extras_file, unpack=True)
-        im_dict['radius'] = rad
-        im_dict['density'] = rho
-        im_dict['temperature'] = temp
-        im_dict['pressure'] = pressure
-        im_dict['soundspeed'] = cs
-        im_dict['entropy'] = ent
+        im_rec.setField('radius',  rad)
+        im_rec.setField('density', rho)
+        im_rec.setField('temperature', temp)
+        im_rec.setField('pressure', pressure)
+        im_rec.setField('soundspeed', cs)
+        im_rec.setField('entropy', ent)
         self._ihe4, self._ic12, self._io16 = 0, 1, 2
-        im_dict['species'] = array([Xhe4, Xc12, Xo16])
+        im_rec.setField('species', array([Xhe4, Xc12, Xo16]))
 
-    def _initFromDicts(self):
-        """Initialize this object using the configuration dictionaries found in
-        self._config_dicts.  The files associated with these dictionaries will
-        be created.
+        #Define TemplateFile
+        im_template_text, lead_space = self._getIMTempText()
+        field_dict = im_rec.getFieldDict()
+        im_tempfile = TemplateFile(field_dict, im_template_text, lead_space)
 
-        For sub-Chandra, the config dicts are labeled "im_dict" and "inputs_dict"
+        #Associate the file and return
+        im_rec.associateFile(im_tempfile)
+        return im_rec
 
-        im_dict:
-            A dictionary of parameters used to generate the 1D initial model as
-            well as the data from the generated model.
-        inputs_dict:
-            A dictionary of the variables in the inputs file that's passed to
-            the Maestro executable.
-
-        Note that these dictionaries need not be fully specified by the user and
-        that some entries may be derived.
+    @staticmethod
+    def genInputsConfigRec():
+        """Return an inputs ConfigRecord with some default values set.
+        
+        This provides a baseline for users to fully initialize and then use to
+        create new SCConfig objects from scratch.
         """
+        from simmy import ConfigRecord, TemplateFile
+        #Define fields and initialize ConfigRecord
+        fields_dict, fieldmap = SCConfig._getInputsFields()
+        rec_label = 'Inputs Configuration'
+        rec_desc = """Configuration of the inputs file.  This is the file passed
+        to the Maestro executable that sets various Maestro parameters,
+        configures the simulation, and provides the location of initial model
+        data."""
+        inputs_rec = ConfigRecord(fields_dict, rec_label, rec_desc, fieldmap)
+        inputs_defaults = SCConfig._getInputsDefaults()
+        for key, val in inputs_defaults.items():
+            inputs_rec.setField(key, val)
 
-        #Finally, fully initialize all dictionaries from the created files.
-        #TODO I like to do this to make sure things are consistent for the two
-        #   methods of initialization.  But maybe it's not needed?
-        self._initInputsDictFromDir()
+        return inputs_rec
+
+    @staticmethod
+    def genIMConfigRec():
+        """Return an initial model ConfigRecord with some default values set.
+        
+        This provides a baseline for users to fully initialize and then use to
+        create new SCConfig objects from scratch.
+        """
+        from simmy import ConfigRecord
+        #Define fields and initialize ConfigRecord
+        fields_dict = SCConfig._getIMFields()
+        rec_label = "Initial Model Configuration"
+        rec_desc  = """Configures the initial model for this simulation.  This
+        corresponds to the _params file used by init1d to build an initial 1D
+        model to be mapped to the 3D domain.  The data from this model are also
+        stored."""
+        im_rec = ConfigRecord(fields_dict, rec_label, rec_desc)
+        im_defaults = SCConfig._getIMDefaults()
+        for key, val in im_defaults.items():
+            im_rec.setField(key, val)
+
+        return im_rec
+
+    @staticmethod
+    def _getInputsDefaults():
+        """Get a dictionary of default values for inputs fields."""
+        #TODO I'm redundantly setting things that do not make sense to have a
+        #default for to None.  Helps me keep track, but maybe should just delete.
+        inputs_defaults = {}
+        inputs_defaults['im_file'] = None
+        inputs_defaults['job_name'] = None
+        inputs_defaults['max_levs'] = '4'
+        inputs_defaults['coarse_res'] = '512'
+        inputs_defaults['anelastic_cutoff'] = None
+        inputs_defaults['octant'] = ".false."
+        inputs_defaults['dim'] = '3'
+        inputs_defaults['physical_size'] = None
+        inputs_defaults['plot_deltat'] = '5.0'
+        inputs_defaults['mini_plot_deltat'] = '0.2'
+        inputs_defaults['chk_int'] = '10'
+        
+        return inputs_defaults
+
+    @staticmethod
+    def _getIMDefaults():
+        """Get a dictionary of default values for initial_model fields."""
+        #TODO I'm redundantly setting things that do not make sense to have a
+        #default for to None.  Helps me keep track, but maybe should just delete.
+        im_defaults = {}
+        im_defaults['M_tot'] = None
+        im_defaults['M_He']  = None
+        im_defaults['delta'] = None
+        im_defaults['temp_core'] = None
+        im_defaults['temp_base'] = None
+        im_defaults['mixed_co_wd'] = '.false.'
+        im_defaults['low_density_cutoff'] = '1.d-4'
+        im_defaults['temp_fluff'] = '7.5d7'
+        im_defaults['smallt'] = '1.d6'
+        im_defaults['xmin'] = '0.0'
+
+        #The initial model resolution should match Maestro's base state
+        #resolution.  This is derived from inputs.  TODO Users are allowed to
+        #override this, but shouldn't?
+        #These should be derived:
+        im_defaults['nx'] = None
+        im_defaults['xmax'] = None
+
+        #The physical size of initial model also can be derived from inputs.
+        #for octant, it is same as domain size.  For full star, half.
+        #TODO In practice, an initial model is tried to get an idea of the
+        #   physical size of the domain, which is then put into inputs.
+        #   However, below we get IM size from inputs.  Would be
+        #   nice to formalize this algorithm here instead of the current method of
+        #   doing it manually.  
+        #   The basic algorithm is to do an initial model with the desired
+        #   properties with a relatively huge xmax.  Then, redo the initial
+        #   model with xmax set to be the radius of T_peak + 50% of that radius.
+        #   This will also be the size of the domain of the 3D grid.
+        #   This gives reasonable balance of buffer zone between surface of star
+        #   and edge of domain without wasting too many resources on unimportant
+        #   parts of the domain.
+
+        im_defaults['radius'] = None
+        im_defaults['density'] = None
+        im_defaults['temperature'] = None
+        im_defaults['pressure'] = None
+        im_defaults['soundspeed'] = None
+        im_defaults['entropy'] = None
+        im_defaults['species'] = None
+
+        return im_defaults
+
+    def _deriveInputs(self, inputs_rec):
+        """Derive inputs fields based on a partially initialized inputs ConfigRecord."""
+        #TODO Derive job_name, im_file, anelastic cutoff, physical size
+        pltfile_base = self._label + "_plt"
+        inputs_rec.setField('plot_base_name', pltfile_base)
+        miniplt_base = self._label + "_miniplt"
+        inputs_rec.setField('mini_plot_base_name',miniplt_base)
+        chkfile_base = self._label + "_chk"
+        inputs_rec.setField('check_base_name', chkfile_base)
+       
+        if inputs_rec.getField('octant').lower().count('false') > 0:
+            inputs_rec.setField('bc_lo', '12')
+            inputs_rec.setField('bc_hi', '12')
+        else:
+            inputs_rec.setField('bc_lo', '13')
+            inputs_rec.setField('bc_hi', '12')
+    
+    def _deriveIM(self, im_rec, inputs_rec):
+        """Derive initial model fields based on a partially initialized inputs
+        and im ConfigRecord."""
+        #TODO Implement this
+        pass
 
     #def _initInputsDict(self):
-    def _getInputsFields(self):
+    @staticmethod
+    def _getInputsFields():
         """Get a dictionary of inputs fields and their descriptions, as well as
-        a mapping from file variable name to ConfigRecord field names."""
+        a mapping from file variable names to ConfigRecord field names."""
         inputs_fields = {}
         fieldmap = {}
         inputs_fields['im_file'] = 'Initial model file with data to be read into the Maestro basestate.'
+        fieldmap['model_file'] = 'im_file'
         inputs_fields['job_name'] = 'Description of the simulation.'
         inputs_fields['max_levs'] = 'Number of levels the AMR will refine to.'
         inputs_fields['coarse_res'] = 'Resolution of the base (coarsest) level'
@@ -347,49 +503,16 @@ class SCConfig(SimConfig):
         fieldmap['bcz_hi'] = 'bc_hi'
 
         return inputs_fields, fieldmap
-        #TODO As of now, users can let all values be default.  This doesn't make
-        #   sense, choose which values are required to be passed.
-        #Define default dictionary values
-        #TODO DEFAULTS HERE, move to new method
-        #inputs_dict = self._config_dicts['inputs_dict']
-        #inputs_defaults = {}
-        #inputs_defaults['im_file'] = "sub_chandra.M_WD-1.00.M_He-0.045.hse.C.10240"
-        #inputs_defaults['job_name'] = "512^3 base grid, T_core = 10^7, T_base = 210 MK -- M_WD=1.0, M_He=0.04"
-        #inputs_defaults['max_levs'] = '4'
-        #inputs_defaults['coarse_res'] = '512'
-        #inputs_defaults['anelastic_cutoff'] = '64000.0'
-        #inputs_defaults['octant'] = ".false."
-        #inputs_defaults['dim'] = '3'
-        #inputs_defaults['physical_size'] = '1500000000.0'
-        #inputs_defaults['plt_delta'] = '5.0'
-        #inputs_defaults['miniplt_delta'] = '0.2'
-        #inputs_defaults['chk_int'] = '10'
 
-        #for key in inputs_defaults:
-        #    if key not in inputs_dict:
-        #        inputs_dict[key] = inputs_default[key]
-
-        ##Define derived dictionary values
-        #pltfile_base = self._label + "_plt"
-        #inputs_dict['pltfile_base'] = pltfile_base
-        #miniplt_base = self._label + "_miniplt"
-        #inputs_dict['miniplt_base'] = miniplt_base
-        #chkfile_base = self._label + "_chk"
-        #inputs_dict['chkfile_base'] = chkfile_base
-       
-        #if inputs_dict['octant'].lower().count('false') > 0:
-        #    inputs_dict['bc_lo'] = '12'
-        #    inputs_dict['bc_hi'] = '12'
-        #else:
-        #    inputs_dict['bc_lo'] = '13'
-        #    inputs_dict['bc_hi'] = '12'
-
-    def _getInputsTempText(self):
+    @staticmethod
+    def _getInputsTempText():
         """Returns the template text and leading space for an inputs file."""
         #TODO Currently, programmer should make sure fields here are the same as
         #in ConfigRecord.  Would be nice to automagically do this.
         #TODO Does this make sense as method?  Can I just define it as property
         #or some such?
+        #TODO Should decide if it makes sense to have more specific format
+        #specifiers.  For now, assume string.
         inputs_template = """&PROBIN
          model_file = "{im_file:s}"
          drdxfac = 5
@@ -403,12 +526,12 @@ class SCConfig(SimConfig):
          mg_bottom_solver = 4
          max_mg_bottom_nlevels = 2
         
-         max_levs = {max_levs:d}
+         max_levs = {max_levs:s}
          regrid_int = 2
         
-         n_cellx = {coarse_res:d}
-         n_celly = {coarse_res:d}
-         n_cellz = {coarse_res:d}
+         n_cellx = {coarse_res:s}
+         n_celly = {coarse_res:s}
+         n_cellz = {coarse_res:s}
         
          stop_time = 30000.
         
@@ -424,36 +547,36 @@ class SCConfig(SimConfig):
         
          the_sfc_threshold = 32768
         
-         anelastic_cutoff = {anelastic_cutoff:f}
+         anelastic_cutoff = {anelastic_cutoff:s}
          base_cutoff_density = 10000.0
          buoyancy_cutoff_factor = 2.d0
-         sponge_center_density = {anelastic_cutoff:f}
+         sponge_center_density = {anelastic_cutoff:s}
          sponge_start_factor = 2.0
          sponge_kappa = 10.0d0
         
          spherical_in = 1
          octant = {octant:s}
-         dm_in = {dim:d}
+         dm_in = {dim:s}
          do_sponge = .true.
         
-         prob_hi_x = {physical_size:f}
-         prob_hi_y = {physical_size:f}
-         prob_hi_z = {physical_size:f}
+         prob_hi_x = {physical_size:s}
+         prob_hi_y = {physical_size:s}
+         prob_hi_z = {physical_size:s}
         
          plot_base_name = "{plot_base_name:s}"
          plot_int = -1
-         plot_deltat = {plot_deltat:f}
+         plot_deltat = {plot_deltat:s}
         
          mini_plot_base_name = "{mini_plot_base_name:s}"
          mini_plot_int = -1
-         mini_plot_deltat = {mini_plot_deltat:f}
+         mini_plot_deltat = {mini_plot_deltat:s}
          mini_plot_var1 = "species"
          mini_plot_var2 = "velocity"
          mini_plot_var3 = "temperature"
          mini_plot_var4 = "radial_velocity"
         
          check_base_name = "{check_base_name:s}"
-         chk_int = {chk_int:d}
+         chk_int = {chk_int:s}
         
          cflfac = 0.7d0
          init_shrink = 0.1d0
@@ -461,12 +584,12 @@ class SCConfig(SimConfig):
          use_soundspeed_firstdt = T
          use_divu_firstdt = T
         
-         bcx_lo = {bc_lo:d}
-         bcx_hi = {bc_hi:d}
-         bcy_lo = {bc_lo:d}
-         bcy_hi = {bc_hi:d}
-         bcz_lo = {bc_lo:d}
-         bcz_hi = {bc_hi:d}
+         bcx_lo = {bc_lo:s}
+         bcx_hi = {bc_hi:s}
+         bcy_lo = {bc_lo:s}
+         bcy_hi = {bc_hi:s}
+         bcz_lo = {bc_lo:s}
+         bcz_hi = {bc_hi:s}
         
             verbose = 1
          mg_verbose = 1
@@ -495,232 +618,63 @@ class SCConfig(SimConfig):
         lead_space = 8
         return inputs_template, lead_space
 
-    def _genInputsFile(self, savepath):
-        """Generate and save an inputs file populated with data
-        self._config_dicts['inputs_dict'].
-        
-        Data is inserted into a template based on the inputs dictionary, which
-        should already be initialized before calling.
-        If expected values are missing, default values defined in this method
-        are used.
+    @staticmethod
+    def _getIMFields():
+        """Get a dictionary of initial model fields and their descriptions."""
+        im_fields = {}
+        im_fields['nx'] = 'Resolution (number of cells) of the 1D model, should match Maestro base state resolution.'
+        im_fields['M_tot'] = 'Mass of the WD core in M_sol.'
+        im_fields['M_He']  = 'Mass of He envelope in M_sol.'
+        im_fields['delta'] = 'Transition delta from core to envelope in cm.'
+        im_fields['temp_core'] = 'Isothermal core temperature in K.'
+        im_fields['temp_base'] = 'Temperature at the base of the He envelope in K.'
+        im_fields['xmin'] = 'Spatial coordinate in cm the model starts at.'
+        im_fields['xmax'] = 'Spatial coordinate in cm of the last cell, should match the sidelength of domain in octant simulation, half sidelength for full star.'
+        im_fields['mixed_co_wd'] = 'Boolean that sets if core is C/O or just C.'
+        im_fields['low_density_cutoff'] = 'Density floor in the initial model (NOT for the 3D Maestro domain).'
+        im_fields['temp_fluff'] = 'Temperature floor, will also be temperature when below density floor.'
+        im_fields['smallt'] = 'An unused parameter that used to be like temp_fluff.'
 
-        Arguments:
-            savepath  --> Full path to the location where this file should be saved
-
-        inputs_dict keys used.  Those with * are typically unique to a
-        simulation and should have been initialized in the dictionary:
-            im_file*   --> Name of the "hse" initial model file
-            job_name*  --> Description of simulation that will be in the
-                           job_info/inputs file
-            max_levs   --> The maximum number of levels the AMR will refine to
-            coarse_res --> Resolution of the base (coarsest) mesh
-            anelastic_cutoff* --> Density below which Maestro's velocity
-                                  constraint switches to the anelastic constraint instead of the fancy
-                                  low Mach constraint.  This helps alleviate issues at the edge of the
-                                  star as density plummets.
-            octant     --> .true. or .false.
-                           If true, model an octant of a star, a full star otherwise
-            dim        --> Dimensionality of the problem (2D or 3D)
-            physical_size* --> Physical extent of the domain cube in cm
-            plt_delta  --> Periodic interval in seconds at which pltfiles should
-                           be saved. A pltfile will be saved every plt_delta of
-                           simulation time.
-            miniplt_delta --> Same as plt_delta but for minipltfiles
-            chk_int    --> Periodic interval in timesteps (integer! not seconds)
-                           at which checkpoint files should be saved
-        """
-        from simmy import TemplateFile
-        #Define the base template string
-        inputs_template = """&PROBIN
-         model_file = "{im_file:s}"
-         drdxfac = 5
+        im_fields['radius'] = 'NumPy array of initial model radius in cm.'
+        im_fields['density'] = 'NumPy array of initial model density in g/cm^3.'
+        im_fields['temperature'] = 'NumPy array of initial model temperature in K.'
+        im_fields['pressure'] = 'NumPy array of initial model pressure in dyn/cm^2.'
+        im_fields['soundspeed'] = 'NumPy array of initial model sound speed in cm/s.'
+        im_fields['entropy'] = 'NumPy array of initial model specific entropy in erg/(g*K).'
+        im_fields['species'] = 'NumPy 2D array of initial model species mass fractions.'
+        return im_fields
+ 
+    @staticmethod
+    def _getIMTempText():
+        """Returns the template text and leading space for an initial model _params file."""
+        #TODO Currently, programmer should make sure fields here are the same as
+        #in ConfigRecord.  Would be nice to automagically do this.
+        #TODO Does this make sense as method?  Can I just define it as property
+        #or some such?
+        im_template = """&params
         
-         job_name = "{job_name:s}"
+          nx = {nx:s}
         
-         use_alt_energy_fix = T
-         ppm_trace_forces = 0
+          M_tot = {M_tot:s}
+          M_He =  {M_He:s}
         
-         hg_bottom_solver = 4
-         mg_bottom_solver = 4
-         max_mg_bottom_nlevels = 2
+          delta = {delta:s}
         
-         max_levs = {max_levs:d}
-         regrid_int = 2
+          xmin = {xmin:s}
+          xmax = {xmax:s}
         
-         n_cellx = {coarse_res:d}
-         n_celly = {coarse_res:d}
-         n_cellz = {coarse_res:d}
+          temp_core = {temp_core:s}
+          temp_base = {temp_base:s}
         
-         stop_time = 30000.
+          mixed_co_wd = {mixed_co_wd:s}
         
-         max_step = 100000000
-        
-         init_iter = 1
-         init_divu_iter = 3
-         do_initial_projection = T
-        
-         max_grid_size_1 = 32
-         max_grid_size_2 = 64
-         max_grid_size_3 = 128
-        
-         the_sfc_threshold = 32768
-        
-         anelastic_cutoff = {anelastic_cutoff:f}
-         base_cutoff_density = 10000.0
-         buoyancy_cutoff_factor = 2.d0
-         sponge_center_density = {anelastic_cutoff:f}
-         sponge_start_factor = 2.0
-         sponge_kappa = 10.0d0
-        
-         spherical_in = 1
-         octant = {octant:s}
-         dm_in = {dim:d}
-         do_sponge = .true.
-        
-         prob_hi_x = {physical_size:f}
-         prob_hi_y = {physical_size:f}
-         prob_hi_z = {physical_size:f}
-        
-         plot_base_name = "{pltfile_base:s}"
-         plot_int = -1
-         plot_deltat = {plt_delta:f}
-        
-         mini_plot_base_name = "{miniplt_base:s}"
-         mini_plot_int = -1
-         mini_plot_deltat = {miniplt_delta:f}
-         mini_plot_var1 = "species"
-         mini_plot_var2 = "velocity"
-         mini_plot_var3 = "temperature"
-         mini_plot_var4 = "radial_velocity"
-        
-         check_base_name = "{chkfile_base:s}"
-         chk_int = {chk_int:d}
-        
-         cflfac = 0.7d0
-         init_shrink = 0.1d0
-         max_dt_growth = 1.1d0
-         use_soundspeed_firstdt = T
-         use_divu_firstdt = T
-        
-         bcx_lo = {bc_lo:d}
-         bcx_hi = {bc_hi:d}
-         bcy_lo = {bc_lo:d}
-         bcy_hi = {bc_hi:d}
-         bcz_lo = {bc_lo:d}
-         bcz_hi = {bc_hi:d}
-        
-            verbose = 1
-         mg_verbose = 1
-         cg_verbose = 0
-        
-         do_burning = T
-        
-         enthalpy_pred_type = 1
-         evolve_base_state = T
-        
-         dpdt_factor = 0.0d0
-         species_pred_type = 1
-         use_tfromp = T
-        
-         single_prec_plotfiles = T
-        
-         use_eos_coulomb = T
-        
-         plot_trac = F
-         plot_base = T
-        
-         velpert_amplitude = 1.d5
-         velpert_scale = 5.d7
-         velpert_steep = 1.d7
+          low_density_cutoff = {low_density_cutoff:s}
+          temp_fluff = {temp_fluff:s}
+          smallt = 1.d6
         
         /"""
-
-        #Now create and save the file
-        inputs_file = TemplateFile(inputs_dict, inputs_template, 8)
-        inputs_file.saveFile(self._inputs_file)
-
-    def _initIMDict(self, gen_im=True):
-        """Initialize the initial model dictionary of key properties describing the
-        1D initial model for this sub-Chandra simulation.
-       
-        Initialize self._config_dicts['im_dict'] with default values for any
-        keys missing in the current dictionary.  This will also run the 1d model
-        generator using the given parameters, unless gen_im is False.
-        """
-        #TODO As of now, users can let all values be default.  This doesn't make
-        #   sense, choose which values are required to be passed.
-        #Define default dictionary values for the '_params' part of the IM dict.
-        #This is needed for the 1d model generator
-        im_dict = self._config_dicts['im_dict']
-        im_defaults = {}
-        im_defaults['M_tot'] = '1.0'                   #Mass of WD core in M_sol
-        im_defaults['M_He']  = '0.0445'                #Mass of He envelope in M_sol
-        im_defaults['delta'] = '2000000.0'             #Transition delta in cm
-        im_defaults['temp_core'] = '90000000.0'        #Isothermal core temp in K
-        im_defaults['temp_base'] = '210000000.0'       #Temp at base of He env in K
-        im_defaults['mixed_co_wd'] = '.false.'         #Core is C/O or just C?
-        im_defaults['low_density_cutoff'] = '1.d-4'    #Density floor for init model (not 3D Maestro simulation)
-        im_defaults['temp_fluff'] = '7.5d7'            #Temp floor, temp also set to this when density floor hit
-        im_defaults['smallt'] = '1.d6'                 #As far as I can tell, #this isn't used.  Maybe was synonym for temp_fluff
-
-        #The initial model resolution should match Maestro's base state
-        #resolution.  This is derived from inputs.  TODO Users are allowed to
-        #override this, but shouldn't?
-        indict = self._config_dicts['inputs_dict']
-        max_levs = float(indict['max_levs'])
-        drdxfac = float(indict['drdxfac'])
-        coarse_res = float(indict['drdxfac'])
-        fine_res = coarse_res*2*(max_levs-1)
-        basestate_res = fine_res*drdxfac
-        nx = basestate_res
-        im_defaults['nx'] = str(nx)  #Resolution of the 1D model, number of cells
-
-        #The physical size of initial model also can be derived from inputs.
-        #for octant, it is same as domain size.  For full star, half.
-        #TODO In practice, an initial model is tried to get an idea of the
-        #   physical size of the domain, which is then put into inputs.
-        #   However, below we get IM size from inputs.  Would be
-        #   nice to formalize this algorithm here instead of the current method of
-        #   doing it manually.  
-        #   The basic algorithm is to do an initial model with the desired
-        #   properties with a relatively huge xmax.  Then, redo the initial
-        #   model with xmax set to be the radius of T_peak + 50% of that radius.
-        #   This will also be the size of the domain of the 3D grid.
-        #   This gives reasonable balance of buffer zone between surface of star
-        #   and edge of domain without wasting too many resources on unimportant
-        #   parts of the domain.
-        octant =
-        if octant:
-            xmax = domain_size
-        else:
-            xmax = domain_size/2.0
-        
-        im_defaults['xmin'] = '0.0'
-        im_defaults['xmax'] = str(xmax)
-
-        for key in im_defaults:
-            if key not in im_dict:
-                im_dict[key] = im_defaults[key]
-
-        #TODO Maybe separate out 1d model generation?  But, IM dict can't be
-        #   fully init'd without 1d model file.
-        if gen_im:
-            #Use _params to generate the 1D model.
-
-            #Add results to dict
-
-        else:
-            #IM will be incomplete! Blank out uninitializeable fields.
-
-
-        im_dict['radius'] = rad
-        im_dict['density'] = rho
-        im_dict['temperature'] = temp
-        im_dict['pressure'] = pressure
-        im_dict['soundspeed'] = cs
-        im_dict['entropy'] = ent
-        self._ihe4, self._ic12, self._io16 = 0, 1, 2
-        im_dict['species'] = array([Xhe4, Xc12, Xo16])
+        lead_space = 8
+        return im_template, lead_space
 
 class SCOutput(SimOutput):
     """Represents the products of a sub-Chandra, such as the diagnostics files,
@@ -734,9 +688,9 @@ class SCOutput(SimOutput):
     def _initFromDir(self, simdir):
         """Initialize this object using an existing configuration."""
 
-        raise NotImplementedError("A subclass of SimOutput did not implement
+        raise NotImplementedError("""A subclass of SimOutput did not implement
         this method or you're directly instantiating SimOutput.  Either way,
-        NO!")
+        NO!""")
 
 #TODO Make driver for tests here (or make an independent test driver?)
 #   + Verify input info

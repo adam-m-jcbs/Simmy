@@ -399,6 +399,12 @@ class SimConfig(object):
             self._config_recs = config_recs
             self._initFromRecs()
 
+    def printConfig(self):
+        """Print out the current configuration."""
+        #This is a basic implementation.  Subclasses may want to override.
+        for rec in self._config_recs:
+            print(rec)
+
     def _initFromDir(self):
         """Initialize this object using an existing configuration found in
         self._simdir.  Subclasses must define how to do this for their
@@ -510,23 +516,38 @@ class ConfigRecord(object):
     #     can't be changed after this.
     #   + parallel dictionary with description of keys
     #   + optional associated file
+    #TODO Should ConfigRecord be able to initialize self from file, or leave
+    #   that to callers?
 
-    def __init__(self, fields_dict, fieldmap=None):
+    def __init__(self, fields_dict, label, description, fieldmap=None):
         """Initialize ConfigRecord with a dict of the valid fields for this
-        record as well as a description of each field.  
-        
-        The keys of fields_dict will be the valid fields, and the values will be
-        the descriptions.  Optionally, an alias map may be passed that maps
-        aliases to valid fields.  The fieldmap is useful for mapping variable
-        names used in files to field names."""
-        #TODO Need a _label property?
+        record as well as a description of each field.
+       
+        Arguments:
+            fields_dict: The keys of fields_dict will be the valid fields, and the values will be
+                         the descriptions.
+            label:       String label for this configuration.
+            description: String description of this configuration.
+
+        Keyword Arguments:
+            fieldmap: An optional alias map that maps
+                      aliases to valid fields.  The fieldmap is useful for mapping variable
+                      names used in files to field names.
+                      fieldmap --> {'file_variable': 'field'}
+        """
+        self._label = label
+        self._desc = description
         self._fields = tuple(fields_dict.keys())
         self._fields_desc = fields_dict.copy()
         self._config_dict = {key: None for key in fields_dict}
         self._myfile = None
-        #TODO Make sure field map still makes sense, maybe need to merge
-        #TemplateFile into ConfigRecord
         self._fieldmap = fieldmap
+
+    @classmethod
+    def genFromFile(cls):
+        """Construct a ConfigRecord from file."""
+        #TODO Does this make sense?
+        pass
 
     def associateFile(self, tempfile):
         """Associate a TemplateFile with this ConfigRecord.
@@ -534,10 +555,10 @@ class ConfigRecord(object):
         Optionally, a mapping may be passed that maps the ConfigRecord's fields
         to the file's variables.  This allows ConfigRecord to have simplified
         aliases for file variables.
-        
-        fieldmap --> {'file_variable': 'field'}"""
+        """
         self._myfile = tempfile
         #TODO Verify all fields are accounted for
+        #TODO Verify tempfile is TemplateFile?
 
     def setFields(self, **kwargs):
         """Set fields found in **kwargs."""
@@ -548,10 +569,10 @@ class ConfigRecord(object):
         """Set a single field."""
         #Map the field, if needed
         cur_key = field
-        if cur_key in fieldmap:
-            cur_key = fieldmap[field]
+        if self._fieldmap is not None and cur_key in self._fieldmap:
+            cur_key = self._fieldmap[field]
         if cur_key not in self._fields:
-            raise KeyError("{} is not a valid field for this ConfigRecord".format(key))
+            raise KeyError("{} is not a valid field for this ConfigRecord".format(cur_key))
         self._config_dict[cur_key] = data
 
     def getField(self, field):
@@ -570,11 +591,14 @@ class ConfigRecord(object):
         #TODO
         pass
 
-    @classmethod
-    def genFromFile(cls):
-        """Construct a ConfigRecord from file."""
-        #TODO Does this make sense?
-        pass
+    def __str__(self):
+        ret = self._label + '\n'
+        ret += 'Description: {}\n'.format(self._desc)
+        ret += 'Fields:\n'
+        for field, desc in self._fields_desc.items():
+            ret += '    {}\n        Description: {}\n        Current value: {}\n'.format(field, desc, self._config_dict[field])
+        return ret
+
 
 ###############################
 ### Machine Management Code ###
@@ -585,6 +609,10 @@ class ConfigRecord(object):
 # TODO If this gets hefty enough, separate into a module.
 
 # Machine class to represent the machine and filesystem we're currently on.
+class Machine(object):
+    """Represents a computational machine, from a laptop to a supercomputer."""
+    pass
+
 
 class RunConfig(object):
     """Represents the configuration and files needed to execute a simulation on
