@@ -448,6 +448,9 @@ class TemplateFile(object):
     .format()-style format-spec replacement tokens through the file as well as a
     dictionary containing the values to be substituted in.
     """
+    #TODO Add a regex dict of some sort to recognize data lines TemplateFiles
+    #want to interact with.  This will facilitate reading data in instead of just
+    #writing it as we currently do.
 
     def __init__(self, replacement_dict, template_string, lead_space):
         """Construct a TemplateFile
@@ -550,15 +553,18 @@ class ConfigRecord(object):
         pass
 
     def associateFile(self, tempfile):
-        """Associate a TemplateFile with this ConfigRecord.
-        
-        Optionally, a mapping may be passed that maps the ConfigRecord's fields
-        to the file's variables.  This allows ConfigRecord to have simplified
-        aliases for file variables.
-        """
-        self._myfile = tempfile
+        """Associate a TemplateFile with this ConfigRecord."""
         #TODO Verify all fields are accounted for
         #TODO Verify tempfile is TemplateFile?
+        #TODO In practice you always need this ConfigRecord's config_dict to
+        #create the tempfile that gets passed in.  So we should probably move the
+        #logic of creating the tempfile into here instead of having tempfile
+        #passed.
+        #TODO Also, in practice the tempfile's replacement dict has to always
+        #match (modulo any fieldmap) ConfigRecord's config_dict.  As of now, we
+        #rely on the user making sure this is true, but should instead build it
+        #into the design of ConfigRecord + TemplateFile.
+        self._myfile = tempfile
 
     def setFields(self, **kwargs):
         """Set fields found in **kwargs."""
@@ -586,10 +592,9 @@ class ConfigRecord(object):
         #TODO Changes to this by user will be reflected here, should do deep copy?
         return self._config_dict
 
-    def saveFile(self):
+    def saveFile(self, savepath):
         """Save a configured file from this ConfigRecord's data."""
-        #TODO
-        pass
+        self._myfile.saveFile(savepath)
 
     def __str__(self):
         ret = self._label + '\n'

@@ -165,7 +165,7 @@ class SCConfig(SimConfig):
         #TODO Should fields all be strings or have appropriate type?
         #   Strings makes it easy to pull them out of and put them back in file form.
         config_recs = []
-        self._initFiles() 
+        self._initFilesFromDir() 
         #TODO For now I'm having SCConfig keep a local reference to the
         #   ConfigRecords.  This suggests to me I might want to have subclasses of
         #   ConfigRecord like InputsRecord and IMRecord.  I like the SimConfig super
@@ -189,7 +189,7 @@ class SCConfig(SimConfig):
         """
         #TODO Other things can be derived as mentioned above, but maybe I want
         #to make sure they can be customized without derivation overwriting?
-        #Design TODO RESTART HERE
+        #Design
         #  + Use the given parameters to build a first attempt at initial model
         #  with large radius
         #  + Based on result, rebuild initial model with a more reasonable
@@ -198,9 +198,94 @@ class SCConfig(SimConfig):
         #  + Use results to fully initialize inputs record
         #
         #  Reference _computeRmacAndCutoffs, _generateInitModel from subchandra.py
+        self._initFiles()
+        self._buildIM()
+        #Fully initialize im record
+        #With im record in hand, fully initialize inputs record
 
-    def _initFiles(self):
-        """Initialize variables with paths to inputs and config files.
+    def _buildIM(self):
+        """Use the partially initialized self._im_rec to build an initial model.
+
+        Fields needed from self._im_rec.
+        Fields with * can reasonably be left to the default:
+            + M_tot  = Mass of the WD core in M_sol.
+            + M_He   = Mass of He envelope in M_sol.
+            + temp_base = Temperature at the base of the He envelope in K.
+            + *delta = Transition delta from core to envelope in cm.
+            + *temp_core = Isothermal core temperature in K.
+
+        Fields needed from self._inputs_rec:
+            + max_levs = Number of levels of refinement.
+            + coarse_res = Resolution of the base (coarsest) grid.
+            + drdxfac  = Factor by which finest grid's resolution is multiplied
+                         to get the base state resolution in spherical geometry.
+            + octant   = Boolean, .true. means we model an octant, not the full star.
+        """
+        from subprocess import call, Popen, PIPE, STDOUT
+        from os.path import join, isfile
+        from os import remove
+        from glob import glob
+        from shlex import split
+        #Design
+        #  + Use the given parameters to build a first attempt at initial model
+        #  with large radius
+        #  + Based on result, rebuild initial model with a more reasonable
+        #  radius
+
+        #Calculate base state resolution, which should also be the initial
+        #model's resolution
+        max_levs = int(self._inputs_rec.getField('max_levs'))
+        coarse_res = int(self._inputs_rec.getField('coarse_res'))
+        fine_res = coarse_res*2**(max_levs-1) 
+        drdxfac = int(self._inputs_rec.getField('drdxfac'))
+        octant = self._inputs_rec.getField('octant')
+        octant = octant.lower().count('true') > 0
+        if octant:
+            base_state_res = drdxfac*fine_res
+        else:
+            base_state_res = drdxfac*fine_res/2
+        #TODO Here I'm forcing the correct im resolution, but users may expect
+        #     any nx they pass to be used.  Should design to make it clear users
+        #     can't set nx.
+        self._im_rec.setField('nx', str(base_state_res))
+
+        #For now, choose a pretty huge size.  We'll adjust down later.
+        self._im_rec.setField('xmax', '1.1e9')
+
+        #We should now have all the information we need to write a _params file
+        #for the initial model builder.
+        im_template_text, lead_space = SCConfig._getIMTempText()
+        field_dict = im_rec.getFieldDict()
+        im_tempfile = TemplateFile(field_dict, im_template_text, lead_space)
+        self._im_rec.associateFile(im_tempfile)
+        self._im_rec.saveFile(self._params_file)
+
+        #Execute the initial model builder
+        #TODO RESTART HERE
+        #Make sure helmtable is linked
+        if not isfile('helm_table.dat'):
+            call(['ln', '-s', join(simconfig.Maestro_home, 'Microphysics', 'EOS', 'helmeos', 'helm_table.dat')])
+
+        #Build the executable command
+        init1d_exe = join(simconfig.Maestro_home, 'Util', 'initial_models', 'sub_chandra', 
+              'init_1d.Linux.gfortran.debug.exe') + ' ' + pfilename
+
+        #Execute, removing any old IM data files
+        old_files = glob('sub_chandra.M_WD*')
+        for f in old_files:
+            remove(f)
+        i1d_proc = Popen(split(init1d_exe), stdout=PIPE, stderr=PIPE)
+        (i1d_out, i1d_err) = i1d_proc.communicate()
+        if i1d_err:
+            print('init1d error: ', i1d_err)
+            print('init1d out, last 5 lines:')
+            for line in i1d_out.split('\n')[-5:]:
+                print(line)
+ 
+
+    def _initFilesFromDir(self):
+        """Initialize variables with paths to inputs and config files for an
+        existing simulation.
         
         Initializes self._inputs_file, self._params_file, self._imdata_files
         """
@@ -236,6 +321,36 @@ class SCConfig(SimConfig):
             raise NotImplementedError("Having multiple extras initial model files in model dir not currently implemented")
         self._imdata_files = (hse_list[0], extras_list[0])
         #print('im data files: {}'.format(self._imdata_files))
+
+    def _initFiles(self):
+        """Initialize variables with paths to inputs and config files to be
+        written for a new simulation.
+        
+        Initializes self._inputs_file, self._params_file.
+        self._imdata_files is initialized after the initial model is built.
+        """
+        from os.path import join, basename
+        from glob import glob
+        #NOTE Convention established here: 
+        #     A simulation directory contains a `model` directory with inputs
+        #     file in it.  inputs file looks like
+        #         inputs<dim>d.<simulation label>
+        #TODO Handle multiple inputs files in model dir?
+        #TODO Use regex instead of glob, it's safer and better-defined
+
+        #All config files for the model go here
+        base_dir = join(self._simdir, 'model')
+        model_label = self._label
+       
+        #Input file that is passed to executable as arg
+        inputs_filename = "inputs3d.{}".format(model_label)
+        self._inputs_file = join(base_dir, inputs_filename)
+        #print('inputs file: {}'.format(self._inputs_file))
+      
+        #Parameters file describing initial model parameters
+        params_filename = "_params.{}".format(model_label)
+        self._params_file = join(base_dir, params_filename)
+        #print('_params file: {}'.format(self._params_file))
 
     def _initInputsRecFromDir(self):
         """Initialize a ConfigRecord of inputs variables based on the inputs file."""
