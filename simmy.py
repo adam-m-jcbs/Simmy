@@ -371,6 +371,24 @@ class Simulation(object):
         this method or you're directly instantiating Simulation.  Either way,
         NO!""")
 
+    @classmethod
+    def buildSim(cls, label, base_dir, **kwargs):
+        """Build a new Simulation object configured with kwargs.  The kwargs
+        will be determined by subclasses."""
+
+        return cls._buildMe(label, base_dir, **kwargs)
+
+    @classmethod
+    def _buildMe(cls, label, base_dir, **kwargs):
+        """Build a new Simulation object configured with kwargs.  The kwargs
+        will be determined by subclasses."""
+
+        raise NotImplementedError("""A subclass of Simulation did not implement
+        this method or you're directly instantiating Simulation.  Either way,
+        NO!""")
+
+
+
 class SimConfig(object):
     """Represents all of the configuration needed to specify a particular
     simulation.  This could include inputs files, initial models, and/or the
@@ -616,7 +634,65 @@ class ConfigRecord(object):
 # Machine class to represent the machine and filesystem we're currently on.
 class Machine(object):
     """Represents a computational machine, from a laptop to a supercomputer."""
-    pass
+
+    def __init__(self):
+        """Initialize the Machine object."""
+        self.home_root = self._getHome()
+        self.scratch_root = self._getScratch()
+
+    def _getHome(self):
+        """Get the root directory for user's home on this machine."""
+        
+        raise NotImplementedError("""A subclass of Machine did not implement
+        this method or you're directly instantiating Machine.  Either way,
+        NO!""")
+
+    def _getScratch(self):
+        """Get the root directory for scratch space on this machine.
+        
+        Scratch space is a part of the filesystem or an independent filesystem
+        reserved for large amounts of data.  Such spaces are often purged of old
+        files at regular intervals.  If this machine has no scratch space,
+        returns None."""
+        
+        raise NotImplementedError("""A subclass of Machine did not implement
+        this method or you're directly instantiating Machine.  Either way,
+        NO!""")
+
+    @staticmethod
+    def getCurrentMachine()
+        """Return a Machine representing the current host machine."""
+        import socket
+    
+        #Based on the hostname, import an implementation of Machine
+        host = socket.gethostname()
+        if host is None:
+            raise OSError("No environment variable HOST.")
+        elif host.count('titan') == 1:
+            try:
+                machmodule = __import__("titan")        # The __import__ builtin is
+                                                        # a way to import modules not named until runtime
+                return machmodule.TitanSC(scomp_config)
+            except ImportError:
+                print('Cannot find module for host {}'.format(host))
+                return None
+        
+        #elif host.count('sn.astro') == 1:
+        #    try:
+        #        machmodule = __import__("sn")
+        #        return machmodule.snSC(scomp_config)
+        #    except ImportError:
+        #        print('Cannot find module for host {}'.format(host))
+        #        return None
+        #elif host.count('siona') == 1:
+        #    try:
+        #        machmodule = __import__("siona")
+        #        return machmodule.sionaSC(scomp_config)
+        #    except ImportError:
+        #        print('Cannot find module for host {}'.format(host))
+        #        return None
+        else:
+            raise NotImplementedError("Unimplemented host: ", host)
 
 
 class RunConfig(object):

@@ -138,6 +138,37 @@ class SCSimulation(Simulation):
         configuration."""
         return SCOutput(simdir)
 
+    @classmethod
+    def _buildMe(cls, label, base_dir, **kwargs):
+        """Build a new Sub-Chandra simulation.
+
+        Required Keyword Arguments:
+            + M_tot  = Mass of the WD core in M_sol.
+            + M_He   = Mass of He envelope in M_sol.
+            + temp_base = Temperature at the base of the He envelope in K.
+            + delta = Transition delta from core to envelope in cm.
+            + temp_core = Isothermal core temperature in K.
+
+            + max_levs = Number of levels of refinement.
+            + coarse_res = Resolution of the base (coarsest) grid.
+            + drdxfac  = Factor by which finest grid's resolution is multiplied
+                         to get the base state resolution in spherical geometry.
+            + octant   = Boolean, .true. means we model an octant, not the full star.
+        """
+        #TODO Add other valid kwargs that one might want to modify, for now we
+        #start with those most likely to be changed from simulation to
+        #simulation.
+
+        #Get Machine configuration
+    
+        #Get partially initialized SCConfig
+
+        #Use config to build initial model
+
+        #Finish SCConfig initialization
+
+        #Construct and return new SCSimulation
+
 class SCConfig(SimConfig):
     """Represents all of the configuration needed to specify a sub-Chandra
     simulation.  This includes inputs files, initial models, and the location of
