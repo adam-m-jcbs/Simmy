@@ -292,7 +292,7 @@ class SCConfig(SimConfig):
         self._im_rec.saveFile(self._params_file)
 
         #Execute the initial model builder
-        #TODO RESTART HERE
+        #TODO Move this out of SCConfig, doesn't belong. Goes to Simulation
         #Make sure helmtable is linked
         if not isfile('helm_table.dat'):
             call(['ln', '-s', join(simconfig.Maestro_home, 'Microphysics', 'EOS', 'helmeos', 'helm_table.dat')])

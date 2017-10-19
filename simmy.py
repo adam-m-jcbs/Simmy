@@ -66,43 +66,47 @@ class SimulationGrid(object):
     This class serves as a base class for a grid of a specific code's
     simulations.  Specific codes should subclass this and add functionality
     particular to them while making use of the interface and generically useful
-    methods/properties provided by SimulationGrid."""
+    methods/properties provided by SimulationGrid.  SimulationGrid can also be
+    seen as a simulation manager, so it's useful even if you're only """
     ##Global Data##
  
     ##Constructor##
-    def __init__(self, label, stage_base, scratch_base=None):
+    def __init__(self, label, code_base, stage_base, exe_base=None):
         """Initialize the SimulationGrid object.
  
-           Why a staging directory and a scratch directory?
-           On many machines there is a large filesystem (scratch) for running
+           Arguments:
+           self         --> implicitly passed reference to this instance of SimulationGrid
+           label        --> this grid's label
+           code_base    --> path to base directory containing source code the
+                            simulations are built from
+           stage_base   --> path to base directory containing all simulations in the grid
+           exe_base     --> path to base directory where the simulations are executed (optional)
+                            If not provided, it is assumed simulations are run in
+                            the staging directories.
+
+           Why a staging directory and an exe directory?
+           On many machines there is a large filesystem (scratch/exe) for running
            simulations that is purged and a smaller filesystem (stage) that is
-           backed up.  This is the motivation for having a staging and scratch
+           backed up.  This is the motivation for having a staging and exe
            directory.
            
            The setup for simulations and their reduced (small size) output will
            be kept in staging, while the actual run and large output will be
-           executed in scratch.  Large output that can't fit in staging should be
+           executed in exe.  Large output that can't fit in staging should be
            stored in high performance storage that is available on most machines
            that have the stage/scratch configuration.  Even for systems that
            don't have a purged scratch directory, this is a nice way to keep a
            clean space with simulation essentials and a place to tweak and
            experiment on a run.
- 
-           Arguments:
-           self         --> implicitly passed reference to this instance of SimulationGrid
-           label        --> this grid's label
-           stage_base   --> path to base directory containing all simulations in the grid
-           scratch_base --> path to base directory where the work is done but data's purged (optional)
-                            If not provided, it is assumed simulations are run in
-                            the staging directories.
            """
+        self._code_base = code_base
         self._stage_base = stage_base
-        if scratch_base is None:
-            self._scratch_base = self._stage_base
-            self._use_scratch = False
+        if exe_base is None:
+            self._exe_base = self._stage_base
+            self._use_exe = False
         else:
-            self._scratch_base = scratch_base
-            self._use_scratch = True
+            self._exe_base = exe_base
+            self._use_exe = True
         self._label = label
         self._my_sims = self._getActiveSims()
  
@@ -123,8 +127,8 @@ class SimulationGrid(object):
  
         active_sims = self._getActiveSimDirs()
         
-        if self._use_scratch:
-            heading = '{0:29s}|{1:14s}'.format('Label', 'In scratch?')
+        if self._use_exe:
+            heading = '{0:29s}|{1:14s}'.format('Label', 'In exe?')
             list_format = '{0:29s}|{1:14s}'
         else:
             heading = '{0:29s}'.format('Label')
@@ -135,11 +139,11 @@ class SimulationGrid(object):
         
         print(heading)
         for r in active_runs:
-            if self._use_scratch:
-                #Check scratch TODO mention purge check for subclasses?
-                rundir = join(self._scratch_base, r)
+            if self._use_exe:
+                #Check exe TODO mention purge check for subclasses?
+                rundir = join(self._exe_base, r)
                 if isdir(rundir):
-                    if self._inScratch(rundir):
+                    if self._inEXE(rundir):
                         sc_str = yep
                     else:
                         sc_str = purged
@@ -278,7 +282,7 @@ class SimulationGrid(object):
            as note.txt."""
         import os
         
-        stg_dir, wrk_dir = self._stage_dir, self._scratch_dir
+        stg_dir, wrk_dir = self._stage_dir, self._exe_dir
  
         #Check for a note, return it if it exists
         if(os.path.isfile(stg_dir + '/' + run_label + '/output/note.txt')):
@@ -661,13 +665,26 @@ class Machine(object):
 
     @staticmethod
     def getCurrentMachine()
-        """Return a Machine representing the current host machine."""
+        """Return a Machine representing the current host machine.
+        
+        This requires that the detected system or host has an implementation
+        in the python path.
+        """
         import socket
+        from platform import system
     
         #Based on the hostname, import an implementation of Machine
         host = socket.gethostname()
         if host is None:
-            raise OSError("No environment variable HOST.")
+            sys_type = system().lower()
+            if sys_type.startswith('linux'):
+                machmodule = __import__("linux_generic") # The __import__ builtin is
+                                                         # a way to import modules not named until runtime
+                return machmodule.LinuxMachine(scomp_config)
+            elif not sys_type:
+                raise OSError("Cannot determine platform.")
+            else:
+                raise OSError("Unimplemented system platform({}) with no hostname information.".format(sys_type))
         elif host.count('titan') == 1:
             try:
                 machmodule = __import__("titan")        # The __import__ builtin is
@@ -692,9 +709,10 @@ class Machine(object):
         #        print('Cannot find module for host {}'.format(host))
         #        return None
         else:
-            raise NotImplementedError("Unimplemented host: ", host)
+            raise NotImplementedError("Unimplemented host: {}".format(host))
 
 
+#TODO Get rid of this, just use ConfigRecord as generic config object.
 class RunConfig(object):
     """Represents the configuration and files needed to execute a simulation on
     a particular machine.  
