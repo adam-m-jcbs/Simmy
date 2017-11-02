@@ -1,0 +1,23 @@
+&params
+
+  nx = 10240
+
+  M_tot = 1.0
+  M_He = 0.0445
+
+  delta = 2000000.0
+
+  xmin = 0.0
+  xmax = 750000000.0
+
+  temp_core = 90000000.0
+  temp_base = 210000000.0
+
+  mixed_co_wd = .false.
+
+  low_density_cutoff = 1.d-4
+  temp_fluff = 7.5d7
+  smallt = 1.d6
+
+/
+
