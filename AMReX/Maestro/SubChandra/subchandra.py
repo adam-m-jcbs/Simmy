@@ -229,10 +229,19 @@ class SCConfig(SimConfig):
         #  + Use results to fully initialize inputs record
         #
         #  Reference _computeRmacAndCutoffs, _generateInitModel from subchandra.py
+        
+        #Select out the config records.  
+        #   TODO As mentioned elsewhere, this seems
+        #   like I'm working around a poor design.  Should consider writing
+        #   ConfigRecord subclasses or develop an otherwise more robust method
+        #   for identifying the records.
+        for rec in self._config_recs:
+            if rec._label.count('Inputs Configuration') > 0:
+                self._inputs_rec = rec
+            if rec._label.count('Initial Model Configuration') > 0:
+                self._im_rec = rec
         self._initFiles()
         self._buildIM()
-        #Fully initialize im record
-        #With im record in hand, fully initialize inputs record
 
     def _buildIM(self):
         """Use the partially initialized self._im_rec to build an initial model.
@@ -253,10 +262,11 @@ class SCConfig(SimConfig):
             + octant   = Boolean, .true. means we model an octant, not the full star.
         """
         from subprocess import call, Popen, PIPE, STDOUT
-        from os.path import join, isfile
+        from os.path import join, isfile, dirname
         from os import remove
         from glob import glob
         from shlex import split
+        from simmy import TemplateFile
         #TODO
         #   + Add ability to build the initial model exe?  As of now, user needs
         #   to have built it.
@@ -281,7 +291,7 @@ class SCConfig(SimConfig):
         #TODO Here I'm forcing the correct im resolution, but users may expect
         #     any nx they pass to be used.  Should design to make it clear users
         #     can't set nx.
-        self._im_rec.setField('nx', str(base_state_res))
+        self._im_rec.setField('nx', str(int(base_state_res)))
 
         #For now, choose a pretty huge size.  We'll adjust down later.
         self._im_rec.setField('xmax', '1.1e9')
@@ -289,7 +299,7 @@ class SCConfig(SimConfig):
         #We should now have all the information we need to write a _params file
         #for the initial model builder.
         im_template_text, lead_space = SCConfig._getIMTempText()
-        field_dict = im_rec.getFieldDict()
+        field_dict = self._im_rec.getFieldDict()
         im_tempfile = TemplateFile(field_dict, im_template_text, lead_space)
         self._im_rec.associateFile(im_tempfile)
         self._im_rec.saveFile(self._params_file)
@@ -297,30 +307,60 @@ class SCConfig(SimConfig):
         #Execute the initial model builder
         #Make sure helmtable is linked
         #TODO For now, just checking.  Would be nice to link if table not found
-        #RESTART HERE
         im_exe = self._im_rec.getField('im_exe')
-        helm_path = join(basedir(im_exe), 'helm_table.dat')
+        helm_path = join(dirname(im_exe), 'helm_table.dat')
         if not isfile(helm_path):
-            pass #send error
-        if not isfile('helm_table.dat')
+            raise RuntimeError("No helm_table.dat, cannot execute initial model builder.")
+        if not isfile('helm_table.dat'):
             call(['ln', '-s', helm_path])
 
         #Build the executable command
-        init1d_exe = join(simconfig.Maestro_home, 'Util', 'initial_models', 'sub_chandra', 
-              'init_1d.Linux.gfortran.debug.exe') + ' ' + pfilename
+        im_exe_cmd = im_exe + ' ' + self._params_file
+        print(im_exe_cmd)
 
         #Execute, removing any old IM data files
         old_files = glob('sub_chandra.M_WD*')
         for f in old_files:
             remove(f)
-        i1d_proc = Popen(split(init1d_exe), stdout=PIPE, stderr=PIPE)
-        (i1d_out, i1d_err) = i1d_proc.communicate()
-        if i1d_err:
-            print('init1d error: ', i1d_err)
-            print('init1d out, last 5 lines:')
-            for line in i1d_out.split('\n')[-5:]:
-                print(line)
- 
+        im_proc = Popen(split(im_exe_cmd), stdout=PIPE, stderr=PIPE)
+        (im_out, im_err) = im_proc.communicate()
+        if im_err:
+            print('init1d error: ', im_err)
+            raise RuntimeError("Initial model builder failed.")
+
+        #Now adjust the radius down and rebuild
+        #Read in data, find the radius of peak temperature, choose a maximum
+        #radius of rpeak + rpeak*rfac
+        #Set the anelastic cutoff and sponge central density as the density at
+        #the top of the convective envelope (where temperature levels off)
+        #divided by sponge_st_fac
+        #ASSUMPTION: initial model data for exactly one model 
+        #  exists in the current directory
+        #RESTART HERE
+        imfile = glob('sub_chandra.M_WD*.hse*')[0]
+        rfac = 0.5
+        rad, rho, temp = loadtxt(imfile, usecols=(0,1,2), unpack=True)
+        rmax = 0
+        ancut = 0.0
+        te_old = 0.0
+        for r, d, t in zip(rad, rho, temp):
+            dt = t - te_old
+            if dt < 0.0:
+                rmax = r
+            if rmax and dt == 0.0:
+                ancut = d_old/simconfig.sponge_st_fac
+                scd   = ancut
+                break
+            te_old = t
+            d_old = d
+
+        rmax = rmax + rmax*rfac
+        return (round(rmax, -7), round(ancut, -3), round(scd, -3))
+
+
+
+
+
 
     def _initFilesFromDir(self):
         """Initialize variables with paths to inputs and config files for an
@@ -539,6 +579,7 @@ class SCConfig(SimConfig):
         #default for to None.  Helps me keep track, but maybe should just delete.
         inputs_defaults = {}
         inputs_defaults['im_file'] = None
+        inputs_defaults['drdxfac'] = '5'
         inputs_defaults['job_name'] = None
         inputs_defaults['max_levs'] = '4'
         inputs_defaults['coarse_res'] = '512'
@@ -636,6 +677,7 @@ class SCConfig(SimConfig):
         fieldmap = {}
         inputs_fields['im_file'] = 'Initial model file with data to be read into the Maestro basestate.'
         fieldmap['model_file'] = 'im_file'
+        inputs_fields['drdxfac'] = '5'
         inputs_fields['job_name'] = 'Description of the simulation.'
         inputs_fields['max_levs'] = 'Number of levels the AMR will refine to.'
         inputs_fields['coarse_res'] = 'Resolution of the base (coarsest) level'
@@ -777,7 +819,8 @@ class SCConfig(SimConfig):
          velpert_amplitude = 1.d5
          velpert_scale = 5.d7
          velpert_steep = 1.d7
-        /"""
+        /
+        """
         lead_space = 8
         return inputs_template, lead_space
 
@@ -841,7 +884,8 @@ class SCConfig(SimConfig):
           temp_fluff = {temp_fluff:s}
           smallt = 1.d6
         
-        /"""
+        /
+        """
         lead_space = 8
         return im_template, lead_space
 
