@@ -67,7 +67,8 @@ class SimulationGrid(object):
     simulations.  Specific codes should subclass this and add functionality
     particular to them while making use of the interface and generically useful
     methods/properties provided by SimulationGrid.  SimulationGrid can also be
-    seen as a simulation manager, so it's useful even if you're only """
+    seen as a simulation manager, so it's useful even if you're only running one
+    model."""
     ##Global Data##
  
     ##Constructor##
@@ -664,7 +665,7 @@ class Machine(object):
         NO!""")
 
     @staticmethod
-    def getCurrentMachine()
+    def getCurrentMachine():
         """Return a Machine representing the current host machine.
         
         This requires that the detected system or host has an implementation

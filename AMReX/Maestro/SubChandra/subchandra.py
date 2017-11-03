@@ -215,7 +215,7 @@ class SCConfig(SimConfig):
 
         The minimum non-default field values that need to be defined for this are:
 
-        Initial Model: M_tot, M_he, delta, temp_core, temp_base
+        Initial Model: M_tot, M_he, delta, temp_core, temp_base, im_exe
         Everything else can be derived.
         """
         #TODO Other things can be derived as mentioned above, but maybe I want
@@ -257,6 +257,9 @@ class SCConfig(SimConfig):
         from os import remove
         from glob import glob
         from shlex import split
+        #TODO
+        #   + Add ability to build the initial model exe?  As of now, user needs
+        #   to have built it.
         #Design
         #  + Use the given parameters to build a first attempt at initial model
         #  with large radius
@@ -292,10 +295,15 @@ class SCConfig(SimConfig):
         self._im_rec.saveFile(self._params_file)
 
         #Execute the initial model builder
-        #TODO Move this out of SCConfig, doesn't belong. Goes to Simulation
         #Make sure helmtable is linked
-        if not isfile('helm_table.dat'):
-            call(['ln', '-s', join(simconfig.Maestro_home, 'Microphysics', 'EOS', 'helmeos', 'helm_table.dat')])
+        #TODO For now, just checking.  Would be nice to link if table not found
+        #RESTART HERE
+        im_exe = self._im_rec.getField('im_exe')
+        helm_path = join(basedir(im_exe), 'helm_table.dat')
+        if not isfile(helm_path):
+            pass #send error
+        if not isfile('helm_table.dat')
+            call(['ln', '-s', helm_path])
 
         #Build the executable command
         init1d_exe = join(simconfig.Maestro_home, 'Util', 'initial_models', 'sub_chandra', 
@@ -497,11 +505,15 @@ class SCConfig(SimConfig):
         return inputs_rec
 
     @staticmethod
-    def genIMConfigRec():
+    def genIMConfigRec(im_exe=None):
         """Return an initial model ConfigRecord with some default values set.
         
         This provides a baseline for users to fully initialize and then use to
         create new SCConfig objects from scratch.
+
+        im_exe is the full path to the executable that builds the initial model.
+        If you want to build a configuration from scratch, you'll need to
+        provide this.
         """
         from simmy import ConfigRecord
         #Define fields and initialize ConfigRecord
@@ -515,7 +527,9 @@ class SCConfig(SimConfig):
         im_defaults = SCConfig._getIMDefaults()
         for key, val in im_defaults.items():
             im_rec.setField(key, val)
-
+        if im_exe is not None:
+            im_rec.setField('im_exe', im_exe)
+        
         return im_rec
 
     @staticmethod
@@ -544,6 +558,9 @@ class SCConfig(SimConfig):
         #TODO I'm redundantly setting things that do not make sense to have a
         #default for to None.  Helps me keep track, but maybe should just delete.
         im_defaults = {}
+
+        im_defaults['im_exe'] = None
+
         im_defaults['M_tot'] = None
         im_defaults['M_He']  = None
         im_defaults['delta'] = None
@@ -768,6 +785,11 @@ class SCConfig(SimConfig):
     def _getIMFields():
         """Get a dictionary of initial model fields and their descriptions."""
         im_fields = {}
+
+        #Information about the executable
+        im_fields['im_exe'] = 'Full path to the initial model builder.'
+
+        #Parameters sent to the executable that builds the model
         im_fields['nx'] = 'Resolution (number of cells) of the 1D model, should match Maestro base state resolution.'
         im_fields['M_tot'] = 'Mass of the WD core in M_sol.'
         im_fields['M_He']  = 'Mass of He envelope in M_sol.'
@@ -781,6 +803,7 @@ class SCConfig(SimConfig):
         im_fields['temp_fluff'] = 'Temperature floor, will also be temperature when below density floor.'
         im_fields['smallt'] = 'An unused parameter that used to be like temp_fluff.'
 
+        #Arrays for data from the built initial model
         im_fields['radius'] = 'NumPy array of initial model radius in cm.'
         im_fields['density'] = 'NumPy array of initial model density in g/cm^3.'
         im_fields['temperature'] = 'NumPy array of initial model temperature in K.'
