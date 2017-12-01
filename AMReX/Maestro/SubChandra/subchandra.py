@@ -240,11 +240,13 @@ class SCConfig(SimConfig):
                 self._inputs_rec = rec
             if rec._label.count('Initial Model Configuration') > 0:
                 self._im_rec = rec
-        self._initFiles()
+        self._initFilePaths()
         self._buildIM()
 
     def _buildIM(self):
-        """Use the partially initialized self._im_rec to build an initial model.
+        """Use the partially initialized self._im_rec and self._inputs_rec to
+        build an initial model.  This will also set derived values in
+        self._im_rec and self._inputs_rec.
 
         Fields needed from self._im_rec.
         Fields with * can reasonably be left to the default:
@@ -260,6 +262,9 @@ class SCConfig(SimConfig):
             + drdxfac  = Factor by which finest grid's resolution is multiplied
                          to get the base state resolution in spherical geometry.
             + octant   = Boolean, .true. means we model an octant, not the full star.
+            + *sponge_start_factor = Factor by which to multiply
+                         sponge_center_density.  Decides starting density for numerical
+                         sponge.
         """
         from subprocess import call, Popen, PIPE, STDOUT
         from os.path import join, isfile, dirname
@@ -328,7 +333,6 @@ class SCConfig(SimConfig):
             print('init1d error: ', im_err)
             raise RuntimeError("Initial model builder failed.")
 
-        #Now adjust the radius down and rebuild
         #Read in data, find the radius of peak temperature, choose a maximum
         #radius of rpeak + rpeak*rfac
         #Set the anelastic cutoff and sponge central density as the density at
@@ -336,13 +340,14 @@ class SCConfig(SimConfig):
         #divided by sponge_st_fac
         #ASSUMPTION: initial model data for exactly one model 
         #  exists in the current directory
-        #RESTART HERE
         imfile = glob('sub_chandra.M_WD*.hse*')[0]
         rfac = 0.5
         rad, rho, temp = loadtxt(imfile, usecols=(0,1,2), unpack=True)
         rmax = 0
         ancut = 0.0
         te_old = 0.0
+        ssfac = self._inputs_rec.getField('sponge_start_factor')
+
         for r, d, t in zip(rad, rho, temp):
             dt = t - te_old
             if dt < 0.0:
@@ -355,8 +360,13 @@ class SCConfig(SimConfig):
             d_old = d
 
         rmax = rmax + rmax*rfac
-        return (round(rmax, -7), round(ancut, -3), round(scd, -3))
+        rmax_final = round(rmax, -7)
+        ancut_final = round(ancut, -3)
+        scd_final = round(scd, -3)
 
+        #Using data from the model, rebuild with more reasonable radius
+
+        #Set values in config records and save files with new data
 
 
 
@@ -401,7 +411,7 @@ class SCConfig(SimConfig):
         self._imdata_files = (hse_list[0], extras_list[0])
         #print('im data files: {}'.format(self._imdata_files))
 
-    def _initFiles(self):
+    def _initFilePaths(self):
         """Initialize variables with paths to inputs and config files to be
         written for a new simulation.
         
@@ -576,7 +586,7 @@ class SCConfig(SimConfig):
     def _getInputsDefaults():
         """Get a dictionary of default values for inputs fields."""
         #TODO I'm redundantly setting things that do not make sense to have a
-        #default for to None.  Helps me keep track, but maybe should just delete.
+        #default of None.  Helps me keep track, but maybe should just delete.
         inputs_defaults = {}
         inputs_defaults['im_file'] = None
         inputs_defaults['drdxfac'] = '5'
@@ -584,6 +594,7 @@ class SCConfig(SimConfig):
         inputs_defaults['max_levs'] = '4'
         inputs_defaults['coarse_res'] = '512'
         inputs_defaults['anelastic_cutoff'] = None
+        inputs_defaults['sponge_start_factor'] = '2.0'
         inputs_defaults['octant'] = ".false."
         inputs_defaults['dim'] = '3'
         inputs_defaults['physical_size'] = None
@@ -597,7 +608,7 @@ class SCConfig(SimConfig):
     def _getIMDefaults():
         """Get a dictionary of default values for initial_model fields."""
         #TODO I'm redundantly setting things that do not make sense to have a
-        #default for to None.  Helps me keep track, but maybe should just delete.
+        #default of None.  Helps me keep track, but maybe should just delete.
         im_defaults = {}
 
         im_defaults['im_exe'] = None
@@ -685,6 +696,7 @@ class SCConfig(SimConfig):
         fieldmap['n_celly'] = 'coarse_res'
         fieldmap['n_cellz'] = 'coarse_res'
         inputs_fields['anelastic_cutoff'] = 'Density cutoff below which the Maestro velocity constraint is simplified to the anelastic constraint.'
+        inputs_fields['sponge_start_factor'] = 'The numerical sponge will start at sponge_center_density*sponge_start_factor.'
         inputs_fields['octant'] = "Boolean that sets if an octant or full star should be modeled."
         inputs_fields['dim'] = 'Dimensionality of the problem.'
         fieldmap['dm_in'] = 'dim'
@@ -756,7 +768,7 @@ class SCConfig(SimConfig):
          base_cutoff_density = 10000.0
          buoyancy_cutoff_factor = 2.d0
          sponge_center_density = {anelastic_cutoff:s}
-         sponge_start_factor = 2.0
+         sponge_start_factor = {sponge_start_factor:s}
          sponge_kappa = 10.0d0
         
          spherical_in = 1
