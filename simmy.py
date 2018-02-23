@@ -35,6 +35,15 @@
 #   structure/organization, but I predict this to be a point of fragility for
 #   users that aren't me.
 #   + Would it be better to use Namespaces instead of dicts for config?
+#   + For initial development I'm dumping most things here.  Once things are
+#   reasonable prototyped, I need to break into modules.  Current module
+#   categories I'm imagining are Simulation, Machine, and Util (e.g. for
+#   TemplateFile, ConfigRecord).
+#   + Check PEP8 cromulency.
+#   + For now, I'm using a strategy of copying needed files from the main
+#   codebase into sim directories.  This means the files need to be built.  I
+#   want to add functionality that builds executables and such instead of
+#   copying manually built ones out.
 
 ###########################################
 ### Global Imports, Data, and Constants ###
@@ -328,8 +337,9 @@ class SimulationGrid(object):
 # Simulation class to represent a specific simulation.
 class Simulation(object):
     """Represents a particular simulation's configuration and model parameters
-    as well as the different management and analysis actions you'd like to carry
-    out on a simulation."""
+    as well as the different management actions you'd like to carry out on a
+    simulation.
+    """
 
     def __init__(self, label, base_dir):
         """Initializes a simulation object using an existing setup in a
@@ -337,8 +347,8 @@ class Simulation(object):
         methods.
         
         Arguments:
-            label      --> label for this simulation, will also be name of dir
-                           where it's stored
+            label      --> label for this simulation, will be used for naming
+                           (e.g. directories and files)
             base_dir   --> path to the base directory this simulation is stored in
         """
         self.label = label
