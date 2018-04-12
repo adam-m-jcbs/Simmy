@@ -47,7 +47,7 @@ bonus, this facilitates getting people new to a code or supercomputer up to
 speed quickly.
 
 As of now, the project is focused on astrophysical codes running in a Linux
-environment, such as the `AMReX` suite of codes, `Kepler`, `MESA`, `dStar`, and
+environment, such as `AMReX` codes, `Kepler`, `MESA`, `dStar`, and
 `FLASH`.  Once an alpha is available with some working prototype
 implementations, the code design should allow for application to other domains.
 At this point, pull requests and issues will also be welcomed from the
