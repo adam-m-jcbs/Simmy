@@ -1,5 +1,5 @@
 # This is intended to be a generalized python infrastructure for managing a
-# suite or grid of simulations.  The design to to have high-level abstract
+# suite or grid of simulations.  simmy's designed as a set of high-level abstract
 # classes that take care of basics and that template the management, while
 # implementations of the abstract classes will handle specific machines, codes,
 # etc.  This is based in part on the infrastructure I developed for managing a
@@ -44,6 +44,7 @@
 #   codebase into sim directories.  This means the files need to be built.  I
 #   want to add functionality that builds executables and such instead of
 #   copying manually built ones out.
+#   + See github issues for others not here.
 
 ###########################################
 ### Global Imports, Data, and Constants ###
