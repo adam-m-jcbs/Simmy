@@ -34,16 +34,16 @@
 #   to redesign?  I personally like systematically enforcing a directory
 #   structure/organization, but I predict this to be a point of fragility for
 #   users that aren't me.
-#   + Would it be better to use Namespaces instead of dicts for config?
 #   + For initial development I'm dumping most things here.  Once things are
 #   reasonable prototyped, I need to break into modules.  Current module
 #   categories I'm imagining are Simulation, Machine, and Util (e.g. for
-#   TemplateFile, ConfigRecord).
+#   TemplateFile, DefinedDict).
 #   + Check PEP8 cromulency.
 #   + For now, I'm using a strategy of copying needed files from the main
 #   codebase into sim directories.  This means the files need to be built.  I
 #   want to add functionality that builds executables and such instead of
 #   copying manually built ones out.
+#   + Add module docstring
 
 ###########################################
 ### Global Imports, Data, and Constants ###
@@ -591,13 +591,67 @@ class ConfigRecord(object):
 # as a computational system (e.g. supercomputer, laptop, maybe even mobile?).
 # I've sectioned it off as I may one day break it off into its own module.  
 # TODO If this gets hefty enough, separate into a module.
+# TODO Originally I designed this as an ABC meta class. Now I just mark abstract
+# methods with NotImplementedError.  Is there any payoff for implementing as ABC
+# worth the extra complication?
 
 # Machine class to represent the machine and filesystem we're currently on.
 class Machine(object):
-    """Represents a computational machine, from a laptop to a supercomputer."""
+    """
+    Abstracts a computational machine, from a laptop to a supercomputer.
+    
+    The abstraction is specifically designed for simulation management.  The
+    intent is to enable the design of scripts for a problem/simulation that can
+    be run with little-to-no modification from one machine to another.  Ideally,
+    it would be "no" modification, but it's hard to completely hide the
+    hardware/software/filesystem differences between, say, a laptop and
+    leadership-class computing facility.
+    """
 
     def __init__(self):
         """Initialize the Machine object."""
+        #+Meta data
+        meta_desc = {'name':  "str, A name for this Machine",
+                     'hosts': "list, List of strings of valid hostnames for this Machine"}
+        meta_dict = {'name': None,
+                     'hosts': None}
+        #This base metadata is required to be defined by all Machine
+        # implementations.  Implementations are free to add additional fields to
+        # their own meta ddicts.  
+        #If the base ddict defaults to None, it is required to be defined by
+        # implementations. If it defaults to a "null" value ("" for strings,
+        # NaN for numbers, etc), then it is optional.
+        self._meta_base = DefinedDict(meta_dict, meta_desc)
+
+        #iCER example
+        #meta_dict = {'name': 'iCER',
+        #             'hosts': ['dev-intel14',
+        #                       'dev-intel14-k20',
+        #                       'dev-intel14-phi',
+        #                       'dev-intel16',
+        #                       'dev-intel16-k80',
+        #                       'dev-intel18']}
+
+        #+Computational resources available
+        cpart_desc = {'arch': 'str, informal description of the computing ' +
+                              'architecture or processor and any attached ' +
+                              'accelerators, e.g. KNL, haswell, POWER9 + '  +
+                              'Volta V100, i7, Xeon E5 + K80, etc',
+                      'node_count': 'int, number of nodes in the partition',
+                      'hw_cores_pn': 'int, hardware/physical cores per node',
+                      'logical_core_fac': 'int, number of logical cores per ' +
+                                          'hardware core (e.g. hardware ' +
+                                          'threads per physical core)',
+                      'gpus_pn': 'int, GPUs per node',
+                      'mem_domains_pn': 'int, memory domains per node (e.g. ' +
+                                        'NUMA nodes per node)',
+                      'mem_per_domains': 'str, human-readable size of memory ' +
+                                         'in each domain, e.g. 256 GB'}
+        #cpart_dict = ...
+
+        self._comp_partitions_base = DefinedDict(cpart_dict, cpart_desc)
+
+        #+Storage resources available
         self.home_root = self._getHome()
         self.scratch_root = self._getScratch()
 
@@ -631,6 +685,9 @@ class Machine(object):
         from platform import system
     
         #Based on the hostname, import an implementation of Machine
+        #TODO: I like the idea here, but it'll clearly get unwieldy once enough
+        #   machines are implemented.  Need to design it to do the reflection better.
+        #   AFTER prototyping is done!
         host = socket.gethostname()
         if host is None:
             sys_type = system().lower()
@@ -650,7 +707,14 @@ class Machine(object):
             except ImportError:
                 print('Cannot find module for host {}'.format(host))
                 return None
-        
+        elif host.count('dev-intel14') == 1: #TODO Add all the other iCER hosts, dev-*, gateway, etc
+            try:
+                machmodule = __import__("icer")         # The __import__ builtin is
+                                                        # a way to import modules not named until runtime
+                return machmodule.ICER(scomp_config)
+            except ImportError:
+                print('Cannot find module for host {}'.format(host))
+                return None
         #elif host.count('sn.astro') == 1:
         #    try:
         #        machmodule = __import__("sn")
@@ -668,6 +732,8 @@ class Machine(object):
         else:
             raise NotImplementedError("Unimplemented host: {}".format(host))
 
+
+    
 
 #TODO Get rid of this, just use ConfigRecord as generic config object.
 class RunConfig(object):
@@ -797,11 +863,21 @@ class TemplateFile(object):
 # change, remove keys, which I don't want to do.
 #
 # In developing this and discussing with others, I've come across possible
-# alternatives to writing your own class.  None quite gave me what I wanted, but
+# alternatives to writing my own class.  None quite gave me what I wanted, but
 # for reference check out: `attrs`, `recordclass`, and the new builtin
 # dataclasses.  The issues with these include: not quite achieving what I want,
 # introducing dependencies without enough of a payoff, and/or requiring as much
-# effort to achieve what I want as writing DefinedDict.
+# effort to achieve what I want as writing DefinedDict.  In particular, I value
+# how a DefinedDict 
+#   + restricts the fields(keys), allowing one to write a template DefinedDict
+#     that guarantees a certain set of data to be available when passed to other
+#     code aware of the template,
+#   + gives fields little docstring-like descriptions, and
+#   + is lightweight and dict-like.
+#
+# In some ways, I see these as facilitating the rapid prototyping of and
+# experimenting with potential classes, classes that may have interesting
+# inheritance relationships.
 #
 # TODO: use that __hasattr__ to make mydefdict['key'] and mydefdict.key both
 # work?
@@ -864,6 +940,10 @@ class TemplateFile(object):
 #
 # TODO: Implement type hinting for dict items?
 # TODO: Enforce key to be string?
+# TODO: Implement __add__ so that you can do addition similar to tuples.  Like
+#       with tuples, you shouldn't be able to change an initialized
+#       DefinedDict's fields, but it would be nice to facilitate building new
+#       ones out of existing.
 class DefinedDict(Mapping):
     """
     A dict-like object which has a restricted set of keys/fields defined on
