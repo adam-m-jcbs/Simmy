@@ -633,6 +633,8 @@ class Machine(object):
         #                       'dev-intel18']}
 
         #+Computational resources available
+        self._partitions = {} #dictionary of {'partition_label': partition DefinedDict}
+                              #for all partitions on the system.
         cpart_desc = {'arch': 'str, informal description of the computing ' +
                               'architecture or processor and any attached ' +
                               'accelerators, e.g. KNL, haswell, POWER9 + '  +
@@ -647,13 +649,29 @@ class Machine(object):
                                         'NUMA nodes per node)',
                       'mem_per_domains': 'str, human-readable size of memory ' +
                                          'in each domain, e.g. 256 GB'}
-        #cpart_dict = ...
-
-        self._comp_partitions_base = DefinedDict(cpart_dict, cpart_desc)
+        cpart_dict = {'arch': '',
+                      'node_count': None,
+                      'hw_cores_pn': None,
+                      'logical_core_fac': None,
+                      'gpus_pn': None,
+                      'mem_domains_pn': None,
+                      'mem_per_domains': None}
+        #TODO: Should these base definitions be put elsewhere? Not sure they
+        #make sense in __init__
+        self._partition_base = DefinedDict(cpart_dict, cpart_desc)
 
         #+Storage resources available
-        self.home_root = self._getHome()
-        self.scratch_root = self._getScratch()
+        #Local filesystem, includes scratch but NOT HPSS
+        filesys_desc = {'user_root': 'str, Full path to the user root ' +
+                                     'directory, e.g. $HOME on most *nix systems.',
+                        'scratch_root': 'str, Full path to the base directory ' +
+                                        'you would like to use in any scratch filesystem.  If ' +
+                                        'None, it will be assumed no scratch is available.'}
+        filesys_dict = {'user_root': None, 'scratch_root': None}
+        self._filesys_base = DefinedDict(filesys_dict, filesys_desc)
+
+        #HPSS
+        #TODO Implement HPSS functionality
 
     def _getHome(self):
         """Get the root directory for user's home on this machine."""
