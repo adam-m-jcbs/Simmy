@@ -77,65 +77,62 @@ class ICER(Machine):
         i14_part['mem_per_domain'] = "64 GB" #This is the minimum guaranteed, some nodes have up to 256 GB
         partitions['intel14'] = i14_part 
 
-    def genBatch(self, batch_path, batch_template, batch_ddict):
+    def genBatch(self, batch_path, batch_ddict, batch_template=None):
         """
         Generate a batch script.
 
         Takes the full path to the generated batch file, a TemplateFile for the batch
         scripts, and a DefinedDict of the batch data what will populate
-        TemplateFile.  This needs to be implemented by subclasses.
+        TemplateFile.  Often, the 
         """
-        #TODO User needs to build and send batch_ddict, not subclass.  Should
-        #   make machinery to facilitate this.
+        if batch_template is None:
+            batch_template = ICER.getBatchTemplateFile()
+
 
     @staticmethod
-    def getBatchTemplate():
-        """Return the base TemplateFile for iCER Slurm batch scripts."""
+    def getBatchTemplateFile():
+        """Return the base TemplateFile for iCER SLURM batch scripts."""
         #TODO Make TemplateFile smart about removing indendation like python
         #    does for docstrings.
-        icer_slurm_template_text = """
-#!/bin/bash --login
+        icer_slurm_template_text = """#!/bin/bash --login
 ###################################
 #SBATCH --job-name {job_name[#SBATCH --job-name]:gs_.+}
 #SBATCH --array={array_str[#SBATCH --array=]:[0-9,-]+}
 #SBATCH --time={walltime[#SBATCH --time=]:[0-9]{2}.[0-9]{2}.[0-9]{2}}
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
-#SBATCH --constraint=intel16
-#SBATCH --exclude=lac-217
-#SBATCH --mem-per-cpu=1024
+#SBATCH --nodes={nodes[#SBATCH --nodes=]:[0-9]+}
+#SBATCH --ntasks={ntasks[#SBATCH --ntasks=]:[0-9]+}
+#SBATCH --cpus-per-task={cpus_pt[#SBATCH --cpus-per-task=]:[0-9]+} 1
+#SBATCH --mem-per-cpu={mem_pc[#SBATCH --mem-per-cpu=]:[0-9]+ *[kmgtibKMGTB]*}
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=zac.johnston@monash.edu
+#SBATCH --mail-user={user_email[#SBATCH --mail-user=]:.*@.*\..*}
 ###################################
-N=$SLURM_ARRAY_TASK_ID
-EXE_PATH=$KEPLER_PATH/gfortran/keplery
-ADAPNET_PATH=$KEPLER_GRIDS/pygrids/files/adapnet_alex_email_dec.5.2016.cfg
-BDAT_PATH=$KEPLER_GRIDS/pygrids/files/20161114Reaclib.bdat5.fixed
-cd $KEPLER_MODELS/grid5_36/xrb$N/
-ln -sf $ADAPNET_PATH ./adapnet.cfg
-ln -sf $BDAT_PATH ./bdat
-$EXE_PATH xrb$N xrb_g
+
+./{exe_script[\./]:.*}
 """
 
-        ret = TemplateFile(icer_slurm_template_text)
-
+        return TemplateFile(icer_slurm_template_text)
 
     @staticmethod
-    def getBatchDDict():
+    def getBaseBatchDDict():
         """Return the base DefinedDict for batch job data."""
         #TODO This is now redundant and inconsistent with what's in super's __init__
         batch_desc = {'job_name': 'str, Name to be used for the job, no spaces!',
-                      'walltime': 'str, The requested walltime, in form HH:MM:SS',
-                      'array_str': 'str, If you want an array job, give a valid array str here, e.g. "1-24", "1,4,8-9". "" if you do not want an array job',
+                      'walltime': 'str, The requested walltime, in form [DD:]HH:MM:SS',
+                      'array_str': 'str, optional, If you want an array job, give a valid array str here, e.g. "1-24", "1,4,8-9". "" if you do not want an array job (default)',
                       'nodes': 'int, Number of nodes requested',
-                      'user_email': 'str, email to send queue messages to',
-                      'mem_per_node': 'str, human-readable memory requested per node (e.g. 20 GB)'}
+                      'tasks_pn': 'int, Number of tasks (roughly, processes or MPI tasks) per node, defaults to 1',
+                      'cores_pt': 'int, Number of cores (cpus) per task',
+                      'mem_pn': 'str, human-readable memory requested per node (e.g. 20 GB), defaults to most memory guaranteed to be available (system-dependent)',
+                      'user_email': 'str, optional, email to send any alerts to',
+                      'exe_script': 'str, filename for the script to be executed in the batch submission, put all simulation-specific execution instructions here.'}
         batch_dict = {'job_name': None,
                       'walltime': None,
                       'array_str': "",
                       'nodes': None,
+                      'tasks_pn': 1,
+                      'mem_pn': None,
                       'user_email': "",
-                      'mem_per_node': None}
+                      'exe_script': None}
         
         return DefinedDict(batch_dict, batch_desc)
 

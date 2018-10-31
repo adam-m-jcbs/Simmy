@@ -697,27 +697,41 @@ class Machine(object):
         #   figure out how to abstract this to work for both, if possible.  For now,
         #   just let ntasks=nodes
         batch_desc = {'job_name': 'str, Name to be used for the job, no spaces!',
-                      'walltime': 'str, The requested walltime, in form HH:MM:SS',
-                      'array_str': 'str, If you want an array job, give a valid array str here, e.g. "1-24", "1,4,8-9". "" if you do not want an array job',
+                      'walltime': 'str, The requested walltime, in form [DD:]HH:MM:SS',
+                      'array_str': 'str, optional, If you want an array job, give a valid array str here, e.g. "1-24", "1,4,8-9". "" if you do not want an array job (default)',
                       'nodes': 'int, Number of nodes requested',
-                      'user_email': 'str, email to send queue messages to',
-                      'mem_per_node': 'str, human-readable memory requested per node (e.g. 20 GB)'}
+                      'tasks_pn': 'int, Number of tasks (roughly, processes or MPI tasks) per node, defaults to 1',
+                      'cores_pt': 'int, Number of cores (cpus) per task',
+                      'mem_pn': 'str, human-readable memory requested per node (e.g. 20 GB), defaults to most memory guaranteed to be available (system-dependent)',
+                      'user_email': 'str, optional, email to send any alerts to',
+                      'exe_script': 'str, filename for the script to be executed in the batch submission, put all simulation-specific execution instructions here.'}
         batch_dict = {'job_name': None,
                       'walltime': None,
                       'array_str': "",
                       'nodes': None,
+                      'tasks_pn': 1,
+                      'mem_pn': None,
                       'user_email': "",
-                      'mem_per_node': None}
+                      'exe_script': None}
         
         self._batch_base = DefinedDict(batch_dict, batch_desc)
 
-    def genBatch(self, batch_path, batch_template, batch_ddict):
+    def genBatch(self, batch_path, batch_ddict, exe_text, batch_template=None):
         """
         Generate a batch script.
 
-        Takes the full path to the generated batch file, a TemplateFile for the batch
-        scripts, and a DefinedDict of the batch data what will populate
-        TemplateFile.  This needs to be implemented by subclasses.
+        Arguments:
+            batch_path     --> str, Full path to the file the generated batch script
+                               will be saved to
+            batch_ddict    --> DefinedDict of the data needed for a batch
+                               submission.  Use static method getBaseBatchDDict() to get a base
+                               ddict.
+            exe_text       --> str, executable text to append to the batch
+                               script.  These are the simulation/problem-specific shell
+                               statements that will be executed.
+            batch_template --> TemplateFile, optional, the TemplateFile to be
+                               used to generate the batch script.  By default will be generated
+                               with static method getBatchTemplateFile().
         """
 
         #TODO Add batch_base consistency check/error check
@@ -737,17 +751,59 @@ class Machine(object):
         #NO!""")
 
     def _getScratch(self):
-        """Get the root directory for scratch space on this machine.
+        """
+        Get the root directory for scratch space on this machine.
         
         Scratch space is a part of the filesystem or an independent filesystem
         reserved for large amounts of data.  Such spaces are often purged of old
         files at regular intervals.  If this machine has no scratch space,
-        returns None."""
+        returns None.
+        """
        
         return self._filesys_base['scratch_root']
         #raise NotImplementedError("""A subclass of Machine did not implement
         #this method or you're directly instantiating Machine.  Either way,
         #NO!""")
+
+    @staticmethod
+    def getBatchTemplateFile():
+        """
+        Return the base TemplateFile for this Machine.
+        
+        Subclasses must implement this.
+        """
+        
+        raise NotImplementedError("""A subclass of Machine did not implement
+        this method or you're directly instantiating Machine.  Either way,
+        NO!""")
+
+    @staticmethod
+    def getBaseBatchDDict():
+        """
+        Return the base DefinedDict for a batch job submission.
+        
+        Subclasses are free to provide their own expanded batch ddict, but must
+        include all fields given here.
+        """
+        batch_desc = {'job_name': 'str, Name to be used for the job, no spaces!',
+                      'walltime': 'str, The requested walltime, in form [DD:]HH:MM:SS',
+                      'array_str': 'str, optional, If you want an array job, give a valid array str here, e.g. "1-24", "1,4,8-9". "" if you do not want an array job (default)',
+                      'nodes': 'int, Number of nodes requested',
+                      'tasks_pn': 'int, Number of tasks (roughly, processes or MPI tasks) per node, defaults to 1',
+                      'cores_pt': 'int, Number of cores (cpus) per task',
+                      'mem_pn': 'str, human-readable memory requested per node (e.g. 20 GB), defaults to most memory guaranteed to be available (system-dependent)',
+                      'user_email': 'str, optional, email to send any alerts to',
+                      'exe_script': 'str, filename for the script to be executed in the batch submission, put all simulation-specific execution instructions here.'}
+        batch_dict = {'job_name': None,
+                      'walltime': None,
+                      'array_str': "",
+                      'nodes': None,
+                      'tasks_pn': 1,
+                      'mem_pn': None,
+                      'user_email': "",
+                      'exe_script': None}
+        
+        return DefinedDict(batch_dict, batch_desc)
 
     @staticmethod
     def getCurrentMachine():
@@ -1337,6 +1393,9 @@ class TemplateFile(object):
             field_text = parse_tuple[field_index]
             if field_text is None:
                 continue
+            #TODO: Currently, line_regex defaults to any non-blank line (.+).  I think it
+            #   would be better to default to any literal text preceding the first sub
+            #   descriptor
             line_regex = ".+"
             #Get the optional line_regex if provided
             #TODO maybe make sure user knows a literal '[' in field will break things
