@@ -609,8 +609,20 @@ class Machine(object):
     """
 
     def __init__(self):
-        """Initialize the Machine object."""
+        """
+        Initialize the Machine object.
+        
+        The basic design as of now is to define a bunch of base DefinedDicts
+        that subclasses then populate with data.  The bases serve as Machine's
+        declaration of the required data all subclasses must implement.
+        Subclasses are free to add their own supplemental DefinedDicts with data
+        particular to that subclass.
+        """
         #+Meta data
+        #TODO Some systems have lots of possible hostnames (e.g. iCER). I may
+        #   want to change hosts to contain regexes or globs, or perhaps change how
+        #   I use the hostname to determine where Machine instance to return with
+        #   the factor method
         meta_desc = {'name':  "str, A name for this Machine",
                      'hosts': "list, List of strings of valid hostnames for this Machine"}
         meta_dict = {'name': None,
@@ -647,7 +659,7 @@ class Machine(object):
                       'gpus_pn': 'int, GPUs per node',
                       'mem_domains_pn': 'int, memory domains per node (e.g. ' +
                                         'NUMA nodes per node)',
-                      'mem_per_domains': 'str, human-readable size of memory ' +
+                      'mem_per_domain': 'str, human-readable size of memory ' +
                                          'in each domain, e.g. 256 GB'}
         cpart_dict = {'arch': '',
                       'node_count': None,
@@ -655,7 +667,7 @@ class Machine(object):
                       'logical_core_fac': None,
                       'gpus_pn': None,
                       'mem_domains_pn': None,
-                      'mem_per_domains': None}
+                      'mem_per_domain': None}
         #TODO: Should these base definitions be put elsewhere? Not sure they
         #make sense in __init__
         self._partition_base = DefinedDict(cpart_dict, cpart_desc)
@@ -673,12 +685,56 @@ class Machine(object):
         #HPSS
         #TODO Implement HPSS functionality
 
-    def _getHome(self):
-        """Get the root directory for user's home on this machine."""
+        #+Define what's required for generating a batch submission script.  The
+        #   idea is for this to be generic, and subclasses can then implement SLURM,
+        #   PBS, or whatever the machine uses.
+        #TODO: need to figure out what to do re: a bunch of batch scripts that
+        #   run one executable and scripts that run multiple executables in one job.
+        #   For prototyping, stick with single executable per batch script
+        #   (though I'm allowing use of array jobs, since these are very close
+        #   to single executable per batch and can make things easier)
+        #TODO: SLURM takes ntasks, easiest PBS equivalent is nodes.  Need to
+        #   figure out how to abstract this to work for both, if possible.  For now,
+        #   just let ntasks=nodes
+        batch_desc = {'job_name': 'str, Name to be used for the job, no spaces!',
+                      'walltime': 'str, The requested walltime, in form HH:MM:SS',
+                      'array_str': 'str, If you want an array job, give a valid array str here, e.g. "1-24", "1,4,8-9". "" if you do not want an array job',
+                      'nodes': 'int, Number of nodes requested',
+                      'user_email': 'str, email to send queue messages to',
+                      'mem_per_node': 'str, human-readable memory requested per node (e.g. 20 GB)'}
+        batch_dict = {'job_name': None,
+                      'walltime': None,
+                      'array_str': "",
+                      'nodes': None,
+                      'user_email': "",
+                      'mem_per_node': None}
         
+        self._batch_base = DefinedDict(batch_dict, batch_desc)
+
+    def genBatch(self, batch_path, batch_template, batch_ddict):
+        """
+        Generate a batch script.
+
+        Takes the full path to the generated batch file, a TemplateFile for the batch
+        scripts, and a DefinedDict of the batch data what will populate
+        TemplateFile.  This needs to be implemented by subclasses.
+        """
+
+        #TODO Add batch_base consistency check/error check
+        #TODO User needs to build and send batch_ddict, not subclass.  Should
+        #   make machinery to facilitate this.
         raise NotImplementedError("""A subclass of Machine did not implement
         this method or you're directly instantiating Machine.  Either way,
         NO!""")
+
+
+    def _getHome(self):
+        """Get the root directory for user's home on this machine."""
+        #TODO Error checking, verify exists, etc 
+        return self._filesys_base['user_root']
+        #raise NotImplementedError("""A subclass of Machine did not implement
+        #this method or you're directly instantiating Machine.  Either way,
+        #NO!""")
 
     def _getScratch(self):
         """Get the root directory for scratch space on this machine.
@@ -687,10 +743,11 @@ class Machine(object):
         reserved for large amounts of data.  Such spaces are often purged of old
         files at regular intervals.  If this machine has no scratch space,
         returns None."""
-        
-        raise NotImplementedError("""A subclass of Machine did not implement
-        this method or you're directly instantiating Machine.  Either way,
-        NO!""")
+       
+        return self._filesys_base['scratch_root']
+        #raise NotImplementedError("""A subclass of Machine did not implement
+        #this method or you're directly instantiating Machine.  Either way,
+        #NO!""")
 
     @staticmethod
     def getCurrentMachine():
@@ -749,8 +806,6 @@ class Machine(object):
         #        return None
         else:
             raise NotImplementedError("Unimplemented host: {}".format(host))
-
-
     
 
 #TODO Get rid of this, just use ConfigRecord as generic config object.
@@ -815,61 +870,6 @@ class RunConfig(object):
 # specific to them.  Like with other sections, it may be broken off into its own
 # module.
 from collections.abc import Mapping, MutableMapping
-
-class TemplateFile(object):
-    """Represents a template file. 
-    
-    The essential elements are a string representing the content of a file with
-    .format()-style format-spec replacement tokens through the file as well as a
-    dictionary containing the values to be substituted in.
-    """
-    #TODO Add a regex dict of some sort to recognize data lines TemplateFiles
-    #want to interact with.  This will facilitate reading data in instead of just
-    #writing it as we currently do.
-
-    def __init__(self, replacement_dict, template_string, lead_space):
-        """Construct a TemplateFile
-
-        Arguments:
-            replacement_dict --> Dictionary of data to be substituted into the template file.
-            template_string --> A template of the file's content, with
-                               .format()-style format-spec tokens to be replaced with
-                               replacement_dict values
-            lead_space --> The number of leading spaces to be removed from all
-                           lines in template_string except for the first line (similar to how
-                           python doc strings are processed).
-        """
-        self._replacement_dict = replacement_dict
-        self._template_string = template_string
-        self._lead_space = lead_space
-        self._initFileText()
-
-    def saveFile(self, savepath):
-        """Save the file to the given full path."""
-        from os.path import dirname
-        from os import makedirs
-        makedirs(dirname(savepath), exist_ok=True)
-        with open(savepath, 'w') as f:
-            f.write(self._filetext)
-
-    def getFileText(self):
-        """Get the final, processed text of the file."""
-        return self._filetext
-
-    def _initFileText(self):
-        """Initialize the file's text."""
-        template_lines = self._template_string.splitlines(keepends=True)
-        file_lines = [template_lines[0]]
-        #Trim leading spaces, except on the first line
-        for line in template_lines[1:]:
-            file_lines.append(line[self._lead_space:])
-        filetext = "".join(file_lines)
-
-        #Populate template with data from dictionary
-        #print('rep dict:   ', self._replacement_dict)
-        #print('rep string: ', filetext)
-        self._filetext = filetext.format(**self._replacement_dict)
- 
 
 ## DefinedDict
 # This is my stab at a class I've been wanted for a long while: DefinedDict.
@@ -986,7 +986,6 @@ class DefinedDict(Mapping):
             mydd['field2'] = f1  # Works
             mydd.desc('field2')  # Prints 'The second field, an integer.'
         """
-        from copy import deepcopy
         #NOTE: key private attributes are:
         #self._data = {} The underlying data dictionary
         #self._desc = {} A mapping of keys from _data to descriptions
@@ -1007,8 +1006,8 @@ class DefinedDict(Mapping):
             self._fields = frozenset(desc_map.keys())
             if not (self._fields == set(desc_map.keys()) == set(init_dict.keys())):
                 raise ValueError('init_dict and desc_map do not have the same keys!')
-            #We're careful here to do a deep copy
-            self._desc = deepcopy(desc_map)
+            #Should be no need for a deep copy
+            self._desc = desc_map.copy()
         else:
             error_message = "desc_map is not a Mapping: {}".format(desc_map)
             raise TypeError(error_message)
@@ -1324,9 +1323,11 @@ class TemplateFile(object):
         Parses self._template_text and returns a frozenset of fields as well as
         a mapping of those fields to their field regex and any line regex
             {<field_str>: (<field_regex>, <line_regex | None>)}"""
+        #TODO Above docstring is out of date
         from string import Formatter
         from collections import OrderedDict
         #TODO: Error checking
+        #TODO: What happens if field_regex contains :?
         fmt = Formatter()
         field_ret = []
         field_index = 1
