@@ -18,19 +18,21 @@ class ICER(Machine):
         #Now go through and initialize the Machine that is currently a
         #template/null definition.
         #+meta
-        self._meta_base['name'] = 'iCER HPCC Clusters'
+        self._meta = DefinedDict(self._meta_base._data, self._meta_base._desc)
+        self._meta['name'] = 'iCER HPCC Clusters'
         #TODO Add all possible hosts
-        self._meta_base['hosts'] = ['gateway-00', 'dev-intel14']
+        self._meta['hosts'] = ['gateway-00', 'dev-intel14']
+        self._meta['has_batch'] = True
 
         #+partitions
         #creates self._partitions['icer_gen'] and self._partitions['intel14']
         self._init_parts(self._partitions)
 
         #+filesys
-        self._filesys_base['user_root'] = '/mnt/home/jacob308' #TODO Make arg
-        self._filesys_base['scratch_root'] = None #don't use for now
+        self._filesys = DefinedDict(self._filesys_base._data, self._filesys_base._desc)
+        self._filesys['user_root'] = '/mnt/home/jacob308' #TODO Make arg
+        self._filesys['scratch_root'] = None #don't use for now
 
-        filesys_dict = {'user_root': None, 'scratch_root': None}
         #TODO add defensive superclass method for checking init is successful
         #(all non-optional data is initialized)
 
@@ -81,13 +83,52 @@ class ICER(Machine):
         """
         Generate a batch script.
 
-        Takes the full path to the generated batch file, a TemplateFile for the batch
-        scripts, and a DefinedDict of the batch data what will populate
-        TemplateFile.  Often, the 
+        Arguments:
+            batch_path     --> str, Full path to the file the generated batch script
+                               will be saved to
+            batch_ddict    --> DefinedDict of the data needed for a batch
+                               submission.  Use static method getBaseBatchDDict() to get a base
+                               ddict.
+            exe_text       --> str, executable text to append to the batch
+                               script's pragmas.  These are the mostly
+                               simulation/problem-specific shell statements that
+                               will be executed, and that's why we separate them
+                               from the machine-specific batch script template.
+            batch_template --> TemplateFile, optional, the TemplateFile to be
+                               used to generate the batch script.  By default will be generated
+                               with static method getBatchTemplateFile().
         """
-        if batch_template is None:
-            batch_template = ICER.getBatchTemplateFile()
+        from math import floor
+        #NOTE: As recommended in Machine, this method will first derive
+        #   iCER-specific data and then pass this along to Machine's genBatch
 
+        #Get copies of the batch DefinedDict descriptions and data.
+        icer_desc = batch_ddict.getDesc()
+        icer_data = batch_ddict.getData()
+
+        #Derive ntasks
+        icer_desc['ntasks'] = "int, Total number of tasks requested"
+        tasks_pn = batch_ddict['tasks_pn']
+        nodes = batch_ddict['nodes']
+        icer_data['ntasks'] = tasks_pn * nodes
+        icer_batch_ddict = DefinedDict(icer_data, icer_desc)
+
+        #If not given by user, derive max mem per task
+        #if icer_data['mem_pt'] == '':
+        #    mem_pt = self.partitions['icer_gen']icer_data['']
+
+        #Derive memory per cpu
+        icer_desc['mem_pc'] = "int, Memory per cpu in MB"
+        icer_data['mem_pc'] = floor(
+                float(batch_ddict['mem_pt']) / 
+                float(batch_ddict['cores_pt'])
+            )
+
+        #Create expanded DDict
+        icer_batch_ddict = DefinedDict(icer_data, icer_desc)
+
+        #Pass along to super, now that we've translated the data
+        super().genBatch(batch_path, icer_batch_ddict, batch_template)
 
     @staticmethod
     def getBatchTemplateFile():
@@ -99,9 +140,8 @@ class ICER(Machine):
 #SBATCH --job-name {job_name[#SBATCH --job-name]:gs_.+}
 #SBATCH --array={array_str[#SBATCH --array=]:[0-9,-]+}
 #SBATCH --time={walltime[#SBATCH --time=]:[0-9]{2}.[0-9]{2}.[0-9]{2}}
-#SBATCH --nodes={nodes[#SBATCH --nodes=]:[0-9]+}
 #SBATCH --ntasks={ntasks[#SBATCH --ntasks=]:[0-9]+}
-#SBATCH --cpus-per-task={cpus_pt[#SBATCH --cpus-per-task=]:[0-9]+} 1
+#SBATCH --cpus-per-task={cores_pt[#SBATCH --cpus-per-task=]:[0-9]+} 1
 #SBATCH --mem-per-cpu={mem_pc[#SBATCH --mem-per-cpu=]:[0-9]+ *[kmgtibKMGTB]*}
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user={user_email[#SBATCH --mail-user=]:.*@.*\..*}
@@ -112,27 +152,27 @@ class ICER(Machine):
 
         return TemplateFile(icer_slurm_template_text)
 
-    @staticmethod
-    def getBaseBatchDDict():
-        """Return the base DefinedDict for batch job data."""
-        #TODO This is now redundant and inconsistent with what's in super's __init__
-        batch_desc = {'job_name': 'str, Name to be used for the job, no spaces!',
-                      'walltime': 'str, The requested walltime, in form [DD:]HH:MM:SS',
-                      'array_str': 'str, optional, If you want an array job, give a valid array str here, e.g. "1-24", "1,4,8-9". "" if you do not want an array job (default)',
-                      'nodes': 'int, Number of nodes requested',
-                      'tasks_pn': 'int, Number of tasks (roughly, processes or MPI tasks) per node, defaults to 1',
-                      'cores_pt': 'int, Number of cores (cpus) per task',
-                      'mem_pn': 'str, human-readable memory requested per node (e.g. 20 GB), defaults to most memory guaranteed to be available (system-dependent)',
-                      'user_email': 'str, optional, email to send any alerts to',
-                      'exe_script': 'str, filename for the script to be executed in the batch submission, put all simulation-specific execution instructions here.'}
-        batch_dict = {'job_name': None,
-                      'walltime': None,
-                      'array_str': "",
-                      'nodes': None,
-                      'tasks_pn': 1,
-                      'mem_pn': None,
-                      'user_email': "",
-                      'exe_script': None}
-        
-        return DefinedDict(batch_dict, batch_desc)
+    #@staticmethod
+    #def getBaseBatchDDict():
+    #    """Return the base DefinedDict for batch job data."""
+    #    #TODO This is now redundant and inconsistent with what's in super's __init__
+    #    batch_desc = {'job_name': 'str, Name to be used for the job, no spaces!',
+    #                  'walltime': 'str, The requested walltime, in form [DD:]HH:MM:SS',
+    #                  'array_str': 'str, optional, If you want an array job, give a valid array str here, e.g. "1-24", "1,4,8-9". "" if you do not want an array job (default)',
+    #                  'nodes': 'int, Number of nodes requested',
+    #                  'tasks_pn': 'int, Number of tasks (roughly, processes or MPI tasks) per node, defaults to 1',
+    #                  'cores_pt': 'int, Number of cores (cpus) per task',
+    #                  'mem_pt': 'str, memory requested per task in MB, defaults to most memory guaranteed to be available (system-dependent)',
+    #                  'user_email': 'str, optional, email to send any alerts to',
+    #                  'exe_script': 'str, filename for the script to be executed in the batch submission, put all simulation-specific execution instructions here.'}
+    #    batch_dict = {'job_name': None,
+    #                  'walltime': None,
+    #                  'array_str': "",
+    #                  'nodes': None,
+    #                  'tasks_pn': 1,
+    #                  'mem_pt': None,
+    #                  'user_email': "",
+    #                  'exe_script': None}
+    #    
+    #    return DefinedDict(batch_dict, batch_desc)
 

@@ -624,9 +624,11 @@ class Machine(object):
         #   I use the hostname to determine where Machine instance to return with
         #   the factor method
         meta_desc = {'name':  "str, A name for this Machine",
-                     'hosts': "list, List of strings of valid hostnames for this Machine"}
+                     'hosts': "list, List of strings of valid hostnames for this Machine",
+                     'has_batch': "bool, Indicates if Machine has a batch job submission system."}
         meta_dict = {'name': None,
-                     'hosts': None}
+                     'hosts': None,
+                     'has_batch': None}
         #This base metadata is required to be defined by all Machine
         # implementations.  Implementations are free to add additional fields to
         # their own meta ddicts.  
@@ -696,25 +698,25 @@ class Machine(object):
         #TODO: SLURM takes ntasks, easiest PBS equivalent is nodes.  Need to
         #   figure out how to abstract this to work for both, if possible.  For now,
         #   just let ntasks=nodes
-        batch_desc = {'job_name': 'str, Name to be used for the job, no spaces!',
-                      'walltime': 'str, The requested walltime, in form [DD:]HH:MM:SS',
-                      'array_str': 'str, optional, If you want an array job, give a valid array str here, e.g. "1-24", "1,4,8-9". "" if you do not want an array job (default)',
-                      'nodes': 'int, Number of nodes requested',
-                      'tasks_pn': 'int, Number of tasks (roughly, processes or MPI tasks) per node, defaults to 1',
-                      'cores_pt': 'int, Number of cores (cpus) per task',
-                      'mem_pn': 'str, human-readable memory requested per node (e.g. 20 GB), defaults to most memory guaranteed to be available (system-dependent)',
-                      'user_email': 'str, optional, email to send any alerts to',
-                      'exe_script': 'str, filename for the script to be executed in the batch submission, put all simulation-specific execution instructions here.'}
-        batch_dict = {'job_name': None,
-                      'walltime': None,
-                      'array_str': "",
-                      'nodes': None,
-                      'tasks_pn': 1,
-                      'mem_pn': None,
-                      'user_email': "",
-                      'exe_script': None}
-        
-        self._batch_base = DefinedDict(batch_dict, batch_desc)
+        #batch_desc = {'job_name': 'str, Name to be used for the job, no spaces!',
+        #              'walltime': 'str, The requested walltime, in form [DD:]HH:MM:SS',
+        #              'array_str': 'str, optional, If you want an array job, give a valid array str here, e.g. "1-24", "1,4,8-9". "" if you do not want an array job (default)',
+        #              'nodes': 'int, Number of nodes requested',
+        #              'tasks_pn': 'int, Number of tasks (roughly, processes or MPI tasks) per node, defaults to 1',
+        #              'cores_pt': 'int, Number of cores (cpus) per task',
+        #              'mem_pn': 'int, memory requested per node in MB, defaults to most memory guaranteed to be available (system-dependent)',
+        #              'user_email': 'str, optional, email to send any alerts to',
+        #              'exe_script': 'str, filename for the script to be executed in the batch submission, put all simulation-specific execution instructions here.'}
+        #batch_dict = {'job_name': None,
+        #              'walltime': None,
+        #              'array_str': "",
+        #              'nodes': None,
+        #              'tasks_pn': 1,
+        #              'mem_pn': None,
+        #              'user_email': "",
+        #              'exe_script': None}
+        #
+        #self._batch_base = DefinedDict(batch_dict, batch_desc)
 
     def genBatch(self, batch_path, batch_ddict, exe_text, batch_template=None):
         """
@@ -727,21 +729,44 @@ class Machine(object):
                                submission.  Use static method getBaseBatchDDict() to get a base
                                ddict.
             exe_text       --> str, executable text to append to the batch
-                               script.  These are the simulation/problem-specific shell
-                               statements that will be executed.
+                               script's pragmas.  These are the mostly
+                               simulation/problem-specific shell statements that
+                               will be executed, and that's why we separate them
+                               from the machine-specific batch script template.
             batch_template --> TemplateFile, optional, the TemplateFile to be
                                used to generate the batch script.  By default will be generated
                                with static method getBatchTemplateFile().
+
+        Subclass Note:
+            It is frequently the case that the generic base batch DefinedDict
+            that is guaranteed to exist for any Machine needs to be translated
+            into a machine-specific DefinedDict.  Subclasses should implement
+            this method, build their machine specific DefinedDict, and then call
+            this with super(), passing in a derived batch_ddict.
         """
-
         #TODO Add batch_base consistency check/error check
-        #TODO User needs to build and send batch_ddict, not subclass.  Should
-        #   make machinery to facilitate this.
-        raise NotImplementedError("""A subclass of Machine did not implement
-        this method or you're directly instantiating Machine.  Either way,
-        NO!""")
 
+        #NOTE: Here we use _meta, NOT _meta_base.  _meta is the responsibility
+        #   of subclasses.  Errors will happen here if subclasses don't make this.
+        #   TODO: check for this and warn user if subclass didn't implement
+        if not self._meta['has_batch']:
+            err_str = "You've called genBatch() on a Machine without a batch"\
+                      "job system: {}".format(self._meta['name'])
+            raise RuntimeError(err_str)
 
+        #Use class's static batch_template, unless user gives us their own
+        if batch_template is None:
+            batch_template = self.getBatchTemplateFile()
+
+        #Use batch_ddict and batch_template to render the initial batch script
+        batch_template.initData(batch_ddict.getData())
+        machine_text = batch_template.render()
+        
+        #Append exe_text to batch script and save
+        batch_script_text = machine_text + '\n' + exe_text
+        with open(batch_path, 'w') as bscript:
+            bscript.write(batch_script_text)
+        
     def _getHome(self):
         """Get the root directory for user's home on this machine."""
         #TODO Error checking, verify exists, etc 
@@ -766,6 +791,39 @@ class Machine(object):
         #NO!""")
 
     @staticmethod
+    def memStr2MB(mem_str):
+        """
+        Convert a human-readable string describing memory into a MB integer.
+
+        For example, "256 GB" is returned as 256000.
+        
+        Assumption:
+            We use the SI convention, so 1 MB = 1000 kB (NOT 1024 kB), etc
+        """
+        import re
+        from math import floor
+
+        mem_regex = r' *([0-9]+) *([kmgtbKMGTB]{2})'
+        mem_re = re.compile(mem_regex)
+
+        matches = mem_re.match(mem_str)
+        if matches:
+            mem_unit = matches.group(2).lower()
+            mem_mag  = int(matches.group(1))
+            if mem_unit == 'tb':
+                return mem_mag * 1000 * 1000
+            if mem_unit == 'gb':
+                return mem_mag * 1000
+            elif mem_unit == 'mb':
+                return mem_mag
+            elif mem_unit == 'kb':
+                return floor(float(mem_mag)/1000.0)
+            else:
+                raise ValueError('{} is an invalid memory string unit'.format(mem_unit))
+        else:
+            raise ValueError('mem_str is an invalid memory string')
+
+    @staticmethod
     def getBatchTemplateFile():
         """
         Return the base TemplateFile for this Machine.
@@ -782,26 +840,30 @@ class Machine(object):
         """
         Return the base DefinedDict for a batch job submission.
         
-        Subclasses are free to provide their own expanded batch ddict, but must
-        include all fields given here.
+        Subclasses are free to provide their own expanded base batch ddict, but
+        must include all fields given here.  It is recommended such classes first
+        call this using super() and then add any implementation-specific fields
+        needed that cannot be derived from fields provided here.  Subclasses may
+        also set system-appropriate defaults.
         """
         batch_desc = {'job_name': 'str, Name to be used for the job, no spaces!',
                       'walltime': 'str, The requested walltime, in form [DD:]HH:MM:SS',
                       'array_str': 'str, optional, If you want an array job, give a valid array str here, e.g. "1-24", "1,4,8-9". "" if you do not want an array job (default)',
                       'nodes': 'int, Number of nodes requested',
-                      'tasks_pn': 'int, Number of tasks (roughly, processes or MPI tasks) per node, defaults to 1',
+                      'tasks_pn': 'int, optional, Number of tasks (roughly, processes or MPI tasks) per node, defaults to 1',
                       'cores_pt': 'int, Number of cores (cpus) per task',
-                      'mem_pn': 'str, human-readable memory requested per node (e.g. 20 GB), defaults to most memory guaranteed to be available (system-dependent)',
-                      'user_email': 'str, optional, email to send any alerts to',
-                      'exe_script': 'str, filename for the script to be executed in the batch submission, put all simulation-specific execution instructions here.'}
+                      'mem_pt': 'str, optional, human-readable memory requested per task, defaults to most memory guaranteed to be available (system-dependent)',
+                      'gpu_pn': 'int, optional, GPU accelerators requested per node, defaults to none',
+                      'user_email': 'str, optional, email to send any alerts to'}
         batch_dict = {'job_name': None,
                       'walltime': None,
                       'array_str': "",
                       'nodes': None,
                       'tasks_pn': 1,
-                      'mem_pn': None,
-                      'user_email': "",
-                      'exe_script': None}
+                      'cores_pt': None,
+                      'mem_pt': '',
+                      'gpu_pn': 0,
+                      'user_email': ""}
         
         return DefinedDict(batch_dict, batch_desc)
 
@@ -1088,6 +1150,15 @@ class DefinedDict(Mapping):
     def fields_str(self):
         """Get a string listing and describing all fields."""
         return self.__str__(verbose=False)
+
+    def getData(self):
+        """Get shallow copy of the underlying data dict."""
+        return self._data.copy()
+
+    def getDesc(self):
+        """Get shallow copy of the Mapping of fields to descriptions."""
+        return self._desc.copy()
+
 
     #TODO: setdefault(), copy(), deepcopy()
 
@@ -1379,7 +1450,6 @@ class TemplateFile(object):
         Parses self._template_text and returns a frozenset of fields as well as
         a mapping of those fields to their field regex and any line regex
             {<field_str>: (<field_regex>, <line_regex | None>)}"""
-        #TODO Above docstring is out of date
         from string import Formatter
         from collections import OrderedDict
         #TODO: Error checking
