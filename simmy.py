@@ -723,7 +723,7 @@ class Machine(object):
         Generate a batch script.
 
         Arguments:
-            batch_path     --> str, Full path to the file the generated batch script
+            batch_path     --> str, path to the file the generated batch script
                                will be saved to
             batch_ddict    --> DefinedDict of the data needed for a batch
                                submission.  Use static method getBaseBatchDDict() to get a base
@@ -1080,6 +1080,7 @@ from collections.abc import Mapping, MutableMapping
 #       with tuples, you shouldn't be able to change an initialized
 #       DefinedDict's fields, but it would be nice to facilitate building new
 #       ones out of existing.
+# TODO: Related to above (__add__), a copy/deepcopy implementation would be nice
 class DefinedDict(Mapping):
     """
     A dict-like object which has a restricted set of keys/fields defined on
@@ -1342,8 +1343,8 @@ class TemplateFile(object):
 
     def initData(self, data_dict):
         """Initialize the dictionary mapping fields to substitution data."""
-        if data_dict.keys != self._fields:
-            raise KeyError("data_dict keys do not match this TemplateFile's fields!")
+        if not self._fields.issubset(data_dict.keys()):
+            raise KeyError("data_dict keys do not include all of this TemplateFile's fields!")
         self._data = data_dict
 
     def render(self, data_dict=None):

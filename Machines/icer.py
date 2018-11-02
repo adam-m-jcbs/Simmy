@@ -79,7 +79,7 @@ class ICER(Machine):
         i14_part['mem_per_domain'] = "64 GB" #This is the minimum guaranteed, some nodes have up to 256 GB
         partitions['intel14'] = i14_part 
 
-    def genBatch(self, batch_path, batch_ddict, batch_template=None):
+    def genBatch(self, batch_path, batch_ddict, exe_text, batch_template=None):
         """
         Generate a batch script.
 
@@ -119,8 +119,9 @@ class ICER(Machine):
 
         #Derive memory per cpu
         icer_desc['mem_pc'] = "int, Memory per cpu in MB"
+        mem_pt_mb = Machine.memStr2MB(batch_ddict['mem_pt'])
         icer_data['mem_pc'] = floor(
-                float(batch_ddict['mem_pt']) / 
+                float(mem_pt_mb) / 
                 float(batch_ddict['cores_pt'])
             )
 
@@ -128,7 +129,7 @@ class ICER(Machine):
         icer_batch_ddict = DefinedDict(icer_data, icer_desc)
 
         #Pass along to super, now that we've translated the data
-        super().genBatch(batch_path, icer_batch_ddict, batch_template)
+        super().genBatch(batch_path, icer_batch_ddict, exe_text, batch_template)
 
     @staticmethod
     def getBatchTemplateFile():
@@ -146,8 +147,6 @@ class ICER(Machine):
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user={user_email[#SBATCH --mail-user=]:.*@.*\..*}
 ###################################
-
-./{exe_script[\./]:.*}
 """
 
         return TemplateFile(icer_slurm_template_text)
