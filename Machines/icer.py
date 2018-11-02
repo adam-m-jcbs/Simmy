@@ -135,7 +135,9 @@ class ICER(Machine):
     def getBatchTemplateFile():
         """Return the base TemplateFile for iCER SLURM batch scripts."""
         #TODO Make TemplateFile smart about removing indendation like python
-        #    does for docstrings.
+        #   does for docstrings.
+        #TODO Figure out a way to make this responsive to different
+        #   configurations, e.g. a template with or without array jobs
         icer_slurm_template_text = """#!/bin/bash --login
 ###################################
 #SBATCH --job-name {job_name[#SBATCH --job-name]:gs_.+}
@@ -147,6 +149,11 @@ class ICER(Machine):
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user={user_email[#SBATCH --mail-user=]:.*@.*\..*}
 ###################################
+
+#Prepare the environment
+source ${HOME}/PyVE/bin/activate
+module load GNU/7.3.0-2.30
+N=$SLURM_ARRAY_TASK_ID
 """
 
         return TemplateFile(icer_slurm_template_text)

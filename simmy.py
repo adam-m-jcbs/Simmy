@@ -85,8 +85,7 @@ class SimulationGrid(object):
         """Initialize the SimulationGrid object.
  
            Arguments:
-           self         --> implicitly passed reference to this instance of SimulationGrid
-           label        --> this grid's label
+           label        --> this grid's label (used to name directories, so don't include spaces)
            code_base    --> path to base directory containing source code the
                             simulations are built from
            stage_base   --> path to base directory containing all simulations in the grid
@@ -102,12 +101,12 @@ class SimulationGrid(object):
            
            The setup for simulations and their reduced (small size) output will
            be kept in staging, while the actual run and large output will be
-           executed in exe.  Large output that can't fit in staging should be
+           in exe.  Large output that can't fit in staging should be
            stored in high performance storage that is available on most machines
            that have the stage/scratch configuration.  Even for systems that
            don't have a purged scratch directory, this is a nice way to keep a
-           clean space with simulation essentials and a place to tweak and
-           experiment on a run.
+           clean space with simulation essentials (staging) and a place to tweak and
+           experiment on a run (scratch/exe).
            """
         self._code_base = code_base
         self._stage_base = stage_base
@@ -350,57 +349,125 @@ class Simulation(object):
             label      --> label for this simulation, will be used for naming
                            (e.g. directories and files)
             base_dir   --> path to the base directory this simulation is stored in
+                           Simulation files will be in <base_dir>/<label>
         """
-        self.label = label
-        self._full_path = join(base_dir, label)
-        self._initFromDir(join(base_dir, label))
+        #NOTE: from past experience, the main DDicts should be
+        #   SimConfig: info about inputs files, needed data files, simulation
+        #       configuration
+        #   EXEConfig: info about how to execute this
+        #   Output: info about the outputs of the execution
+        sim_root = join(base_dir, label)
+        self._simcon = self._initSimConfig(label, sim_root)
+        self._execon = self._initEXEConfig()
+        self._simout = self._initSimOutput()
 
-    def _initFromDir(self, simdir):
-        """Initialize the simulation from an existing directory containing
-        configuration and output."""
-        self._simconfig = self._genSimConfigFromDir(simdir)
-        self._runconfigs = self._genRunConfigsFromDir(simdir)
-        self._output = self._genOutputFromDir(simdir)
+        #self._initFromDir(join(base_dir, label))
 
-    def _genSimConfigFromDir(self, simdir):
-        """Generate a SimConfig object for this simulation based on existing
-        configuration."""
+    def _initSimConfig(self, label, sim_root):
+        """
+        Setup a simulation configuration DefinedDict.
+        """
+        simcon_desc = {'label': 'str, label for this simulation (no spaces)',
+                       'sim_root': "str, full path to this simulation's root directory"}
+        simcon_dict = {'label': label,
+                       'sim_root': sim_root}
+
+        return DefinedDict(simcon_desc, simcon_dict)
+
+    def _initEXEConfig(self):
+        """
+        Setup a DefinedDict for data needed to specify execution instructions.
+
+        This DefinedDict stores details used to compose shell scripts for
+        executing the simulation.
+
+        Assumption:
+            self._simcon has been initialized
+        """
+        execon_desc = {'build_path': "str, path to directory where this simulation's executable is built",
+                       'exe_file':   "str, name of the executable file, probably a binary",
+                       'exe_dir':    "str, name of the directory execution will take place in, defaults to 'exe'"}
+        execon_dict = {'build_path': None,
+                       'exe_file':   None,
+                       'exe_dir':    'exe'}
+
+        return DefinedDict(execon_desc, execon_dict)
+
+    def _initSimOutput(self):
+        """
+        Setup a DefinedDict to assist with managing simulation output.
+
+        Assumption:
+            self._simcon has been initialized
+        """
+        simout_desc = {'output_dir': "str, name of the directory output will be stored in, defaults to 'output'"}
+        simout_dict = {'output_dir': 'output'}
+
+        return DefinedDict(execon_desc, execon_dict)
+
+    def getEXETemplateText(batch=False):
+        """
+        Get the text for a TemplateFile of executable shell instructions.
+
+        Arguments:
+            batch --> bool, If True, it's assumed these instructions will be
+                appended to a batch job script header (e.g. the header for a SLURM
+                or TORQUE script).  Otherwise, this will be a stand-alone script
+                that's intended to be executed directly
+                Default: False
+        """
 
         raise NotImplementedError("""A subclass of Simulation did not implement
         this method or you're directly instantiating Simulation.  Either way,
         NO!""")
 
-    def _genRunConfigsFromDir(self, simdir):
-        """Generate a list of RunConfig objects for this simulation based on existing
-        configuration."""
 
-        raise NotImplementedError("""A subclass of Simulation did not implement
-        this method or you're directly instantiating Simulation.  Either way,
-        NO!""")
+    #def _initFromDir(self, simdir):
+    #    """Initialize the simulation from an existing directory containing
+    #    configuration and output."""
+    #    self._simconfig = self._genSimConfigFromDir(simdir)
+    #    self._runconfigs = self._genRunConfigsFromDir(simdir)
+    #    self._output = self._genOutputFromDir(simdir)
 
-    def _genOutputFromDir(self, simdir):
-        """Generate a SimOutput object for this simulation based on existing
-        configuration."""
+    #def _genSimConfigFromDir(self, simdir):
+    #    """Generate a SimConfig object for this simulation based on existing
+    #    configuration."""
 
-        raise NotImplementedError("""A subclass of Simulation did not implement
-        this method or you're directly instantiating Simulation.  Either way,
-        NO!""")
+    #    raise NotImplementedError("""A subclass of Simulation did not implement
+    #    this method or you're directly instantiating Simulation.  Either way,
+    #    NO!""")
 
-    @classmethod
-    def buildSim(cls, label, base_dir, **kwargs):
-        """Build a new Simulation object configured with kwargs.  The kwargs
-        will be determined by subclasses."""
+    #def _genRunConfigsFromDir(self, simdir):
+    #    """Generate a list of RunConfig objects for this simulation based on existing
+    #    configuration."""
 
-        return cls._buildMe(label, base_dir, **kwargs)
+    #    raise NotImplementedError("""A subclass of Simulation did not implement
+    #    this method or you're directly instantiating Simulation.  Either way,
+    #    NO!""")
 
-    @classmethod
-    def _buildMe(cls, label, base_dir, **kwargs):
-        """Build a new Simulation object configured with kwargs.  The kwargs
-        will be determined by subclasses."""
+    #def _genOutputFromDir(self, simdir):
+    #    """Generate a SimOutput object for this simulation based on existing
+    #    configuration."""
 
-        raise NotImplementedError("""A subclass of Simulation did not implement
-        this method or you're directly instantiating Simulation.  Either way,
-        NO!""")
+    #    raise NotImplementedError("""A subclass of Simulation did not implement
+    #    this method or you're directly instantiating Simulation.  Either way,
+    #    NO!""")
+
+    #@classmethod
+    #def buildSim(cls, label, base_dir, **kwargs):
+    #    """Build a new Simulation object configured with kwargs.  The kwargs
+    #    will be determined by subclasses."""
+
+    #    return cls._buildMe(label, base_dir, **kwargs)
+
+    #@classmethod
+    #def _buildMe(cls, label, base_dir, **kwargs):
+    #    """Build a new Simulation object configured with kwargs.  The kwargs
+    #    will be determined by subclasses."""
+
+    #    raise NotImplementedError("""A subclass of Simulation did not implement
+    #    this method or you're directly instantiating Simulation.  Either way,
+    #    NO!""")
 
 ###############################
 ### Machine Management Code ###
